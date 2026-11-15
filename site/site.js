@@ -160,7 +160,7 @@ async function loadPapers() {
     renderGroups();
     const category = $("filterCategory").value;
     const labels = [...new Set(papers.flatMap(p => p.categories || []))].sort();
-    $("filterCategory").replaceChildren(new Option("全部分类", ""), new Option("特别分类（非普通 Poster）", "__featured__"), new Option("暂无分类标签", "__none__"),
+    $("filterCategory").replaceChildren(new Option("全部分类", ""), new Option("特别分类", "__featured__"), new Option("暂无分类标签", "__none__"),
       ...labels.map(label => new Option(label, label)));
     if ([...$("filterCategory").options].some(option => option.value === category)) $("filterCategory").value = category;
     const topic = $("filterTopic").value;
