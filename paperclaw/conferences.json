@@ -1,5 +1,82 @@
 [
   {
+    "name": "PPoPP",
+    "title": "ACM SIGPLAN Symposium on Principles & Practice of Parallel Programming",
+    "category": "计算机体系结构/并行与分布计算/存储系统",
+    "stream": "ppopp",
+    "dblp_url": "https://dblp.org/db/conf/ppopp/"
+  },
+  {
+    "name": "FAST",
+    "title": "USENIX Conference on File and Storage Technologies",
+    "category": "计算机体系结构/并行与分布计算/存储系统",
+    "stream": "fast",
+    "dblp_url": "https://dblp.org/db/conf/fast/"
+  },
+  {
+    "name": "DAC",
+    "title": "Design Automation Conference",
+    "category": "计算机体系结构/并行与分布计算/存储系统",
+    "stream": "dac",
+    "dblp_url": "https://dblp.org/db/conf/dac/"
+  },
+  {
+    "name": "HPCA",
+    "title": "IEEE International Symposium on High Performance Computer Architecture",
+    "category": "计算机体系结构/并行与分布计算/存储系统",
+    "stream": "hpca",
+    "dblp_url": "https://dblp.org/db/conf/hpca/"
+  },
+  {
+    "name": "MICRO",
+    "title": "IEEE/ACM International Symposium on Microarchitecture",
+    "category": "计算机体系结构/并行与分布计算/存储系统",
+    "stream": "micro",
+    "dblp_url": "https://dblp.org/db/conf/micro/index.html"
+  },
+  {
+    "name": "SC",
+    "title": "International Conference for High Performance Computing, Networking, Storage, and Analysis",
+    "category": "计算机体系结构/并行与分布计算/存储系统",
+    "stream": "sc",
+    "dblp_url": "https://dblp.org/db/conf/sc/"
+  },
+  {
+    "name": "ASPLOS",
+    "title": "International Conference on Architectural Support for Programming Languages and Operating Systems",
+    "category": "计算机体系结构/并行与分布计算/存储系统",
+    "stream": "asplos",
+    "dblp_url": "https://dblp.org/db/conf/asplos/"
+  },
+  {
+    "name": "ISCA",
+    "title": "International Symposium on Computer Architecture",
+    "category": "计算机体系结构/并行与分布计算/存储系统",
+    "stream": "isca",
+    "dblp_url": "https://dblp.org/db/conf/isca/"
+  },
+  {
+    "name": "ACM SIGOPS ATC",
+    "title": "ACM SIGOPS Annual Technical Conference",
+    "category": "计算机体系结构/并行与分布计算/存储系统",
+    "stream": "usenix",
+    "dblp_url": "https://dblp.org/db/conf/usenix/index.html"
+  },
+  {
+    "name": "EuroSys",
+    "title": "European Conference on Computer Systems",
+    "category": "计算机体系结构/并行与分布计算/存储系统",
+    "stream": "eurosys",
+    "dblp_url": "https://dblp.org/db/conf/eurosys/"
+  },
+  {
+    "name": "HPDC",
+    "title": "The International ACM Symposium on High-Performance Parallel and Distributed Computing",
+    "category": "计算机体系结构/并行与分布计算/存储系统",
+    "stream": "hpdc",
+    "dblp_url": "https://dblp.org/db/conf/hpdc/"
+  },
+  {
     "name": "SIGCOMM",
     "title": "ACM International Conference on Applications, Technologies, Architectures, and Protocols for Computer Communication",
     "category": "计算机网络",

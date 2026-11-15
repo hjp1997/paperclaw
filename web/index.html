@@ -7,7 +7,7 @@
 <div id="notice" role="alert" hidden></div>
 <div class="layout"><aside>
 <section class="panel"><h2>采集范围</h2><form id="crawlForm">
-<label class="field">数据源<select id="source"><option value="auto">自动选择来源</option><option value="conference">会议官网 · 论文与摘要</option><option value="openreview">OpenReview · 已接收论文与摘要</option><option value="publisher">出版社网页 · 登录后查询</option><option value="crossref">Crossref · IEEE / ACM 会议</option><option value="usenix">USENIX 官方页面 · NSDI</option><option value="dblp">DBLP 公开目录 · 可能要求验证</option><option value="ieee">IEEE 官方 API · 含摘要</option></select></label>
+<label class="field">数据源<select id="source"><option value="auto">自动选择来源</option><option value="conference">会议官网 · 论文与摘要</option><option value="openreview">OpenReview · 已接收论文与摘要</option><option value="publisher">出版社网页 · 登录后查询</option><option value="crossref">Crossref · IEEE / ACM 会议</option><option value="usenix">USENIX 官方页面 · NSDI / FAST / 旧版 ATC</option><option value="dblp">DBLP 公开目录 · 可能要求验证</option><option value="ieee">IEEE 官方 API · 含摘要</option></select></label>
 <p class="help" id="sourceHint">优先读取适用会议的 OpenReview 已接收论文与摘要，其余会议按出版社选择来源。</p>
 <label id="ieeeKeyField" class="field" hidden>IEEE Metadata API Key<input id="ieeeKey" type="password" autocomplete="off" placeholder="仅本次使用，不保存"></label>
 <div class="source-links"><a id="sourceLink" href="https://search.crossref.org/" target="_blank" rel="noopener noreferrer">打开来源网站 ↗</a><a href="https://developer.ieee.org/" target="_blank" rel="noopener noreferrer">申请 IEEE Key ↗</a></div>

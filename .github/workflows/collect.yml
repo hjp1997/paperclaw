@@ -1,0 +1,78 @@
+name: Collect PaperClaw
+
+on:
+  workflow_dispatch:
+    inputs:
+      conferences:
+        description: "会议简称，英文逗号分隔；留空采集五个指定领域的全部 CCF A 会议"
+        type: string
+        default: ""
+      years:
+        description: "年份，英文逗号分隔"
+        type: string
+        default: "2025,2026"
+      refresh_existing:
+        description: "重新采集已有会议年份（关闭则只补缺失组）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: paperclaw-data
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Validate paper processing
+        run: python -m unittest discover -s tests -q
+      - name: Restore collector cache
+        uses: actions/cache@v4
+        with:
+          path: data/pages-cache
+          key: paperclaw-collector-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            paperclaw-collector-${{ runner.os }}-
+      - name: Collect public metadata without AI
+        id: collect
+        env:
+          PAGES_CONFERENCES: ${{ inputs.conferences }}
+          PAGES_YEARS: ${{ inputs.years }}
+          REFRESH_EXISTING: ${{ inputs.refresh_existing }}
+        run: |
+          args=(--conferences "$PAGES_CONFERENCES" --years "$PAGES_YEARS")
+          if [ "$REFRESH_EXISTING" = "true" ]; then args+=(--refresh-existing); fi
+          python pages.py collect-batch "${args[@]}"
+      - name: Save successful groups and collection report
+        if: "!cancelled() && (steps.collect.outcome == 'success' || steps.collect.outcome == 'failure')"
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add site-data
+          if ! git diff --cached --quiet; then
+            git commit -m "Collect public conference metadata without AI"
+            git push origin HEAD:main
+          fi
+      - name: Summarize collections
+        if: "!cancelled() && (steps.collect.outcome == 'success' || steps.collect.outcome == 'failure')"
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path("site-data/status/collections.json")
+          if path.exists():
+              rows = json.loads(path.read_text())["editions"]
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output:
+                  output.write("| Conference | Year | Status | Papers | Reason |\n|---|---|---|---|---|\n")
+                  for row in rows:
+                      output.write(f"| {row['conference']} | {row['year']} | {row['status']} | {row['count']} | {row['reason']} |\n")
+          PY

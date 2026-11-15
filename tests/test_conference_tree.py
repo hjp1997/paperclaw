@@ -17,12 +17,15 @@ def binding(key, venue, title, author, position):
 class ConferenceTreeTests(unittest.TestCase):
     def test_supported_areas_and_routing(self):
         self.assertEqual([sum(c["category"] == area for c in CATALOG.values()) for area in CATEGORIES],
-                         [4, 2, 7, 5, 5])
+                         [11, 4, 2, 7, 5, 5])
         self.assertEqual(CATALOG["NeurIPS"]["stream"], "nips")
         self.assertEqual(CATALOG["SIGKDD"]["stream"], "kdd")
         options = validate_options({"source":"auto", "conferences": list(CATALOG), "years":[2025]})
-        self.assertEqual(len(options["conferences"]), 23)
-        self.assertEqual(sum(c["provider"] == "dblp_rdf" for c in CATALOG.values()), 18)
+        self.assertEqual(len(options["conferences"]), 34)
+        self.assertEqual(sum(c["provider"] == "dblp_rdf" for c in CATALOG.values()), 28)
+        self.assertEqual(CATALOG["ACM SIGOPS ATC"]["stream"], "usenix")
+        self.assertTrue(dblp_rdf.main_proceedings("USENIX ATC", "ACM SIGOPS ATC"))
+        self.assertEqual(CATALOG["FAST"]["provider"], "usenix")
 
     def test_paginate_papers_before_authors_and_keep_edition(self):
         pages = [

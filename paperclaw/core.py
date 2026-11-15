@@ -19,7 +19,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from .catalog import CATALOG, Document, plain, parse_catalog, parse_usenix
-from . import dblp_rdf, openreview, official
+from . import dblp_rdf, openreview, official, proceedings
 from .program import AWARD_INDEX, parse_award_index, program_url, parse_program
 from .titles import prepare_title
 
@@ -164,23 +164,26 @@ class SafeClient:
             # Ignore and retire cooldown fields from earlier versions.
             policy = {"requests": requests + [now]}
             atomic_json(self.policy_file, policy)  # Count failed attempts too.
-            limit = 96 * 1024 * 1024 if source == "program" else MAX_RESPONSE
+            limit = 96 * 1024 * 1024 if source in ("program","proceedings") else MAX_RESPONSE
             if source == "paper_page":
                 url = params["url"]
                 if not official.allowed_page(url):
                     raise CrawlError("该论文链接不在支持的来源中。")
+            elif source == "proceedings":
+                url = proceedings.url(params["conference"],params["year"],params.get("page", ""))
             elif source == "program":
                 url = program_url(params["conference"], params["year"], params.get("part", "program"))
             else:
                 url = ENDPOINTS[source] + "?" + urllib.parse.urlencode(params)
             if source == "usenix":
-                url = ENDPOINTS[source] + f"nsdi{int(params['year']) % 100:02d}/technical-sessions"
+                slug = {"NSDI":"nsdi", "FAST":"fast", "ACM SIGOPS ATC":"atc"}[params.get("conference","NSDI")]
+                url = ENDPOINTS[source] + f"{slug}{int(params['year']) % 100:02d}/technical-sessions"
             elif source in ("ccf", "award_index"):
                 url = ENDPOINTS[source]
             elif source == "dblp_rdf":
                 # SPARQL JSON is negotiated via the explicit format parameter.
                 url = ENDPOINTS[source] + "?" + urllib.parse.urlencode({"query": params["query"], "format": "json"})
-            if source == "program" and self.transport is request_json:
+            if source in ("program","proceedings") and self.transport is request_json:
                 status, headers, raw = self.transport(url, max_response=limit)
             else:
                 status, headers, raw = self.transport(url)
@@ -246,10 +249,11 @@ class SafeClient:
                 raise CrawlError("来源响应过大，本轮已停止。")
             try:
                 data = (official.parse_page(raw, url) if source == "paper_page" else
+                        proceedings.parse(raw, params["conference"],int(params["year"]),params.get("page", "")) if source == "proceedings" else
                         official.parse_arxiv(raw) if source == "arxiv" else
                         parse_award_index(raw) if source == "award_index" else
                         parse_program(raw, params["conference"], params["year"], params.get("part", "program")) if source == "program" else
-                        parse_usenix(raw.decode("utf-8"), int(params["year"])) if source == "usenix" else
+                        parse_usenix(raw.decode("utf-8"), int(params["year"]), params.get("conference","NSDI")) if source == "usenix" else
                         parse_catalog(raw.decode("utf-8")) if source == "ccf" else json.loads(raw))
                 validate_payload(source, data)
             except (ValueError, TypeError, KeyError):
@@ -330,6 +334,7 @@ def venue_matches(venue, conference):
         "SIGMOD": ("Proc. ACM Manag. Data", "Management of Data"),
         "STOC": ("Theory of Computing",),
         "CVPR": ("Computer Vision and Pattern Recognition",),
+        "ACM SIGOPS ATC": ("USENIX ATC", "USENIX Annual Technical Conference"),
     }
     names = (conference, CATALOG[conference]["title"], *aliases.get(conference, ()))
     return any(re.search(r"(?<!\w)" + re.escape(n) + r"(?!\w)", venue, re.I) for n in names)
@@ -573,7 +578,7 @@ def crawl_crossref(client, conference, year, include_workshops, cancel, on_page,
         total_before += total
 
 
-def crawl_dblp_rdf(client, conference, year, include_workshops, cancel, on_page, progress):
+def crawl_dblp_rdf(client, conference, year, include_workshops, cancel, on_page, progress, *, known_total=None, page_size=None):
     if conference == "SIGMOD" and year > max(dblp_rdf.PACMMOD):
         raise CrawlError(f"尚未核对 SIGMOD {year} 的 PACMMOD 卷期，请查看当届会议目录。")
     scope = dblp_rdf.edition(conference, year)
@@ -582,16 +587,20 @@ def crawl_dblp_rdf(client, conference, year, include_workshops, cancel, on_page,
         return result["results"]["bindings"]
     progress(f"{conference} {year}：读取 DBLP 会议目录")
     try:
-        counts = query(dblp_rdf.PREFIX + f"SELECT (COUNT(DISTINCT ?p) AS ?n) WHERE {{ {scope} }}")
-        total = int(counts[0]["n"]["value"])
+        if known_total is None:
+            counts = query(dblp_rdf.PREFIX + f"SELECT (COUNT(DISTINCT ?p) AS ?n) WHERE {{ {scope} }}")
+            total = int(counts[0]["n"]["value"])
+        else:
+            total = int(known_total)
         if total <= 0:
             raise CrawlError(f"DBLP 未找到 {conference} {year} 的会议论文，请检查举办年份和收录情况。")
         seen = set()
         kept = 0
-        for offset in range(0, total, dblp_rdf.PAGE_SIZE):
+        size = page_size or dblp_rdf.PAGE_SIZE
+        for offset in range(0, total, size):
             progress(f"{conference} {year}：读取 DBLP 第 {offset + 1} 条起的论文")
-            records = list(dblp_rdf.page_records(query(dblp_rdf.page_query(scope, offset, dblp_rdf.PAGE_SIZE))))
-            if len(records) != min(total - offset, dblp_rdf.PAGE_SIZE):
+            records = list(dblp_rdf.page_records(query(dblp_rdf.page_query(scope, offset, size))))
+            if len(records) != min(total - offset, size):
                 raise CrawlError("DBLP 分页记录数与目录不一致，已保留之前收到的论文。")
             batch = []
             for record in records:
@@ -646,16 +655,17 @@ def crawl_group(client, source, conference, year, include_workshops, api_key, ca
             raise CrawlError("OpenReview 没有这届主会目录，请使用自动来源或 DBLP。")
         progress(f"{conference} {year}：OpenReview 无此届目录，读取会议目录来源")
     if source == "auto":
-        source = CATALOG[conference]["provider"]
+        source = "usenix" if conference == "ACM SIGOPS ATC" and year <= 2025 else CATALOG[conference]["provider"]
     elif source == "dblp" and CATALOG[conference]["provider"] == "dblp_rdf":
         source = "dblp_rdf"
     if source == "dblp_rdf":
         return crawl_dblp_rdf(client, conference, year, include_workshops, cancel, on_page, progress)
     if source == "usenix":
-        if conference != "NSDI" or include_workshops or year < 2004:
-            raise CrawlError("USENIX 来源支持 2004 年起的 NSDI 主会技术论文；Workshop 请使用 DBLP。")
-        progress(f"NSDI {year}：读取 USENIX 官方技术论文与摘要")
-        data = client.get("usenix", {"year": year, "parser_version": 2}, f"usenix:NSDI:{year}", cancel, progress)
+        first_year = {"NSDI":2004,"FAST":2002,"ACM SIGOPS ATC":1986}.get(conference)
+        if first_year is None or include_workshops or year < first_year or (conference == "ACM SIGOPS ATC" and year > 2025):
+            raise CrawlError("USENIX 来源支持 NSDI、FAST 和 2025 年及以前的 ATC 主会技术论文。")
+        progress(f"{conference} {year}：读取 USENIX 官方技术论文与摘要")
+        data = client.get("usenix", {"year": year, "conference":conference, "parser_version": 3}, f"usenix:{conference}:{year}", cancel, progress)
         total, records = validate_payload("usenix", data)
         batch = [p for r in records if (p := normalize(r, "usenix", conference, year))]
         on_page(batch, total, len(records))

@@ -210,14 +210,17 @@ const sourceInfo = {
   openreview:["读取公开的已接收论文、摘要和报告类型，自动发现当届主会各分轨。支持 ICLR、ICML、NeurIPS、ACL、AAAI、CVPR、ICCV、SIGIR、SIGKDD。","https://openreview.net/"],
   conference:["读取 ICLR、ICML、NeurIPS、CVPR、ICCV 官网的论文目录与摘要。","https://iclr.cc/"],
   publisher:["在官网使用个人或机构账号登录，回到这里打开所选会议的查询链接。导出 BibTeX 后可在下方合并。",""],
-  usenix:["从 NSDI 官方技术议程获取题名、作者与摘要。","https://www.usenix.org/conferences"],
+  usenix:["从 NSDI、FAST 和旧版 ATC 官方技术议程获取题名、作者与摘要。","https://www.usenix.org/conferences"],
   crossref:["通过 Crossref 查询 IEEE / ACM 登记的会议论文集。","https://search.crossref.org/"],
   ieee:["通过 IEEE Metadata API 查询 INFOCOM、ICDE、FOCS、RTSS、CVPR 或 ICCV，请填写 API Key。","https://ieeexplore.ieee.org/"],
   dblp:["查询 DBLP 会议目录，摘要可在采集后按 DOI 补全。","https://dblp.org/"]
 };
 
 function searchUrl(venue, year) {
-  if (venue.name === "NSDI") return "https://www.usenix.org/conference/nsdi" + String(year).slice(-2) + "/technical-sessions";
+  if (["NSDI","FAST"].includes(venue.name) || venue.name === "ACM SIGOPS ATC" && year <= 2025) {
+    const slug = {NSDI:"nsdi",FAST:"fast","ACM SIGOPS ATC":"atc"}[venue.name];
+    return "https://www.usenix.org/conference/" + slug + String(year).slice(-2) + "/technical-sessions";
+  }
   if (venue.prefix === "10.1145") {
     return "https://dl.acm.org/action/doSearch?" + new URLSearchParams({AllField:venue.name + " " + year});
   }

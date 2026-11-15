@@ -100,6 +100,12 @@ const assert=require('node:assert/strict');
     assert.equal(await page.locator('#aiSettings').innerText(),'连接我的 AI');
     await page.locator('.paper-chat').first().click();
     assert.equal(await page.locator('.chat-message').count(),0);
+    await page.locator('#closePaperChat').click();
+    await page.locator('#conferenceChoices input[value="HPCA"]').check();
+    await page.locator('#conferenceChoices input[value="INFOCOM"]').uncheck();
+    await page.waitForFunction(()=>document.querySelector('#visibleCount').textContent==='0');
+    assert.match(await page.locator('#groups').innerText(),/HPCA 2026/);
+    assert.match(await page.locator('#groups').innerText(),/尚未收录/);
     assert.deepEqual(failures,[]);
     console.log('Passed cloud indexes, featured filter, chat connection, per-paper isolation, no key persistence, safe rendering, HTTP errors, redirect prevention, cancellation, custom endpoint checks and responsive dialogs.');
   } finally {await browser.close();}

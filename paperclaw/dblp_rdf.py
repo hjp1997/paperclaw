@@ -1,4 +1,5 @@
 """Read DBLP's public SPARQL index by stream and conference edition."""
+import json
 import re
 from .catalog import CATALOG
 
@@ -15,6 +16,7 @@ def main_proceedings(venue, conference):
         "SIGMOD": ("SIGMOD", "SIGMOD Conference", "SIGMOD Conference Companion",
                    "SIGMOD ARI Reports", "SIGMOD/PODS", "Proc. ACM Manag. Data"),
         "WWW": ("WWW", "The Web Conference"),
+        "ACM SIGOPS ATC": ("USENIX ATC", "USENIX Annual Technical Conference", "ACM SIGOPS ATC", "ATC"),
     }
     names = aliases.get(conference, (conference,))
     return any(re.fullmatch(re.escape(name) + r"(?:\s*\([^()]*\))*", venue, re.I) for name in names)
@@ -60,6 +62,12 @@ def page_query(scope, offset, size):
       OPTIONAL {{ ?p d:hasSignature ?s . ?s a d:AuthorSignature ;
           d:signatureDblpName ?name ; d:signatureOrdinal ?position }}
     }}"""
+
+
+def counts_query(editions):
+    branches = ["{ { " + edition(conference, year) + " } BIND(" + json.dumps(conference) +
+                " AS ?conf) BIND(" + str(int(year)) + " AS ?year) }" for conference,year in editions]
+    return PREFIX + "SELECT ?conf ?year (COUNT(DISTINCT ?p) AS ?n) WHERE { " + " UNION ".join(branches) + " } GROUP BY ?conf ?year"
 
 
 def page_records(bindings):

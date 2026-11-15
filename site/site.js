@@ -199,6 +199,18 @@ function renderGroups() {
     }
     return row;
   }));
+  if (view === "all") {
+    const year = $("filterYear").value;
+    const published = new Set(manifest.groups.map(group => group.key));
+    for (const state of manifest.collection_status || []) {
+      if (!chosenConferences.has(state.conference) || (year && String(state.year) !== year) || published.has(state.key)) continue;
+      const labels = {unavailable:"尚未收录",failed:"暂未采集成功",pending:"待采集",available:"数据待发布"};
+      const row = el("div", "collection-row collection-pending");
+      row.append(el("span", "collection-name", state.conference + " " + state.year), el("span", "collection-count", labels[state.status] || "待采集"));
+      if (state.reason) row.append(el("span", "collection-count", state.reason));
+      $("groups").append(row);
+    }
+  }
 }
 
 function paperCard(p) {
@@ -313,6 +325,7 @@ function render() {
 
 function conferenceTree() {
   const available = new Set(manifest.groups.map(g => g.conference));
+  for (const state of manifest.collection_status || []) available.add(state.conference);
   const venues = manifest.catalog.filter(venue => available.has(venue.name));
   for (const area of [...new Set(venues.map(v => v.category))]) {
     const group = el("details", "venue-group");
@@ -327,7 +340,7 @@ function conferenceTree() {
         if (view !== "all") setView("all"); else loadPapers();
       };
       const count = manifest.groups.filter(g => g.conference === venue.name).reduce((sum, g) => sum + g.count, 0);
-      label.append(box, venue.name, el("span", "venue-count", count));
+      label.append(box, venue.name, el("span", "venue-count", count || "待收录"));
       children.append(label);
     }
     group.append(children);
@@ -439,7 +452,7 @@ window.addEventListener("storage", async event => {
     conferenceTree(); updateSavedCount();
     const restored = await restoreLegacyBookmarks();
     $("filterYear").replaceChildren(new Option("全部年份", ""),
-      ...[...new Set(manifest.groups.map(g => g.year))].sort((a, b) => b - a).map(year => new Option(year, year)));
+      ...[...new Set([...manifest.groups, ...(manifest.collection_status || [])].map(g => g.year))].sort((a, b) => b - a).map(year => new Option(year, year)));
     $("updated").textContent = "数据更新于 " + new Date(manifest.updated_at).toLocaleString("zh-CN");
     await loadPapers();
     if (!restored) notice("旧收藏暂未恢复完成，请稍后刷新重试。");

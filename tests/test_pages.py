@@ -44,6 +44,22 @@ class PagesTests(unittest.TestCase):
         self.assertEqual(len(result),1)
         self.assertEqual(result[0]["abstract"],"Complete abstract")
 
+    def test_source_upgrade_preserves_bookmark_identity(self):
+        old = {**self.paper,"id":"official-program-paper","doi":"","abstract":"Official abstract"}
+        new = {**self.paper,"id":"new-dblp-doi-record"}
+        with contextlib.redirect_stdout(io.StringIO()):
+            pages.save_collections([old],self.data)
+            pages.save_collections([new],self.data,replace=True)
+        rows=pages.load_input(self.data/"infocom-2025.json")
+        self.assertEqual(len(rows),1)
+        self.assertEqual(rows[0]["id"],old["id"])
+        self.assertEqual(rows[0]["doi"],new["doi"])
+        self.assertEqual(rows[0]["abstract"],old["abstract"])
+        other={**new,"id":"different-paper-same-title","doi":"10.1/different"}
+        with contextlib.redirect_stdout(io.StringIO()):
+            pages.save_collections([new,other],self.data,replace=True)
+        self.assertEqual(len(pages.load_input(self.data/"infocom-2025.json")),2)
+
     def test_static_build_manifest_and_subdirectory_assets(self):
         with contextlib.redirect_stdout(io.StringIO()):
             pages.save_collections([self.paper],self.data)
@@ -74,3 +90,43 @@ class PagesTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()),self.assertRaises(ValueError):
                 pages.collect(args)
         self.assertEqual((self.data/"infocom-2025.json").read_bytes(),before)
+
+    def test_batch_checkpoints_independent_groups_without_ai(self):
+        from paperclaw.core import CrawlError
+        def make(conference, title):
+            return normalize(record(venue=conference,title=title),"dblp",conference,2025)
+        old = make("MICRO","Previously published")
+        with contextlib.redirect_stdout(io.StringIO()):
+            pages.save_collections([old],self.data)
+        before = (self.data/"micro-2025.json").read_bytes()
+        counts = [{k:{"value":str(v)} for k,v in {"conf":c,"year":2025,"n":n}.items()}
+                  for c,n in (("PPoPP",1),("MICRO",1))]
+        def crawl(client,c,y,workshops,cancel,on_page,progress,**kwargs):
+            if c == "MICRO": raise CrawlError("Source temporarily unavailable")
+            on_page([make(c,"New public paper")],1,1)
+        args = SimpleNamespace(conferences="PPoPP,HPCA,MICRO",years="2025",data_dir=self.data,refresh_existing=True)
+        with patch.object(pages,"ROOT",self.root), patch.object(pages,"SafeClient") as client, \
+                patch.object(pages,"crawl_dblp_rdf",side_effect=crawl), patch.object(pages,"analyze_paper") as ai, \
+                contextlib.redirect_stdout(io.StringIO()):
+            client.return_value.get.return_value={"results":{"bindings":counts}}
+            pages.collect_batch(args)
+            ai.assert_not_called()
+        self.assertTrue((self.data/"ppopp-2025.json").exists())
+        self.assertEqual((self.data/"micro-2025.json").read_bytes(),before)
+        statuses={s["conference"]:s["status"] for s in pages.collection_status(self.data)}
+        self.assertEqual(statuses,{"HPCA":"unavailable","MICRO":"failed","PPoPP":"available"})
+        with contextlib.redirect_stdout(io.StringIO()): pages.build(self.data,self.root/"output")
+        manifest=json.loads((self.root/"output/manifest.json").read_bytes())
+        self.assertEqual(len(manifest["collection_status"]),3)
+
+    def test_collection_publication_and_analysis_are_separate_workflows(self):
+        root=Path(__file__).resolve().parents[1]/".github/workflows"
+        collector=(root/"collect.yml").read_text("utf-8")
+        publisher=(root/"pages.yml").read_text("utf-8")
+        analyzer=(root/"analyze.yml").read_text("utf-8")
+        for content in (collector,publisher):
+            self.assertNotIn("DEEPSEEK_API_KEY",content)
+            self.assertNotIn("pages.py analyze",content)
+        self.assertIn("pages.py collect-batch",collector)
+        self.assertIn("pages.py analyze",analyzer)
+        self.assertIn("workflow_run:",publisher)

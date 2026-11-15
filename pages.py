@@ -6,18 +6,22 @@ import os
 import re
 import shutil
 import time
-from collections import defaultdict
+import threading
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
 from paperclaw.catalog import CATALOG
-from paperclaw.core import EXPORT_FIELDS, CrawlError, atomic_json, read_json, safe_url
+from paperclaw.core import EXPORT_FIELDS, CrawlError, SafeClient, atomic_json, crawl_dblp_rdf, crawl_group, normalize, read_json, safe_url
+from paperclaw import dblp_rdf, official, proceedings
 from paperclaw.analysis import MODEL, TOPICS, analyze_paper, is_featured, public_analysis
 from paperclaw.instance import InstanceLock
 from paperclaw.server import Application
 from paperclaw.titles import prepare_title
+from paperclaw.program import title_key
 
 ROOT = Path(__file__).resolve().parent
+BATCH_AREAS = {"计算机体系结构/并行与分布计算/存储系统", "计算机网络", "交叉/综合/新兴", "计算机科学理论", "数据库/数据挖掘/内容检索"}
 PUBLIC_FIELDS = set(EXPORT_FIELDS) - {"ai_summary", "title_text"}
 PUBLIC_FIELDS.update(("id", "title_official", "official_url"))
 
@@ -95,9 +99,19 @@ def save_collections(papers, data_dir, *, replace=False):
     for (conference,year), incoming in groups.items():
         path = data_dir / (group_key(conference,year) + ".json")
         previous = {p["id"]:p for p in load_input(path)} if path.exists() else {}
+        by_title = defaultdict(list)
+        for paper in previous.values(): by_title[title_key(paper["title"])].append(paper)
+        incoming_titles = Counter(title_key(paper["title"]) for paper in incoming.values())
+        remapped = {}
         for key,paper in incoming.items():
-            if key in previous:
-                retain_metadata(paper, previous[key])
+            matches = by_title[title_key(paper["title"])]
+            if key not in previous and len(matches) == 1 and incoming_titles[title_key(paper["title"])] == 1:
+                old = matches[0]
+                if not (old.get("doi") and paper.get("doi") and old["doi"].casefold() != paper["doi"].casefold()):
+                    key = paper["id"] = old["id"]
+            if key in previous: retain_metadata(paper, previous[key])
+            remapped[key] = paper
+        incoming = remapped
         merged = incoming if replace else {**previous, **incoming}
         ordered = sorted(merged.values(), key=lambda p:p["title_text"].casefold())
         atomic_json(path, {"schema_version":1, "conference":conference, "year":year,
@@ -143,10 +157,25 @@ def build(data_dir, output):
         "groups":sorted(groups,key=lambda g:(-g["year"],g["conference"])),
         "catalog":[dict(v) for v in CATALOG.values()],
         "topics":TOPICS,
+        "collection_status":collection_status(data_dir),
         "export_fields":[field for field in EXPORT_FIELDS if field != "ai_summary"] +
                         ["topics", "ai_keyphrases", "ai_problem", "ai_method", "ai_results", "ai_model"],
     })
     print(f"Built {len(groups)} collections in {output.resolve()}",flush=True)
+
+
+def collection_status(data_dir):
+    data = read_json(data_dir / "status" / "collections.json", {})
+    rows = data.get("editions", []) if isinstance(data,dict) else []
+    result = []
+    for row in rows:
+        if (not isinstance(row,dict) or row.get("conference") not in CATALOG or type(row.get("year")) is not int or
+                not 1980 <= row["year"] <= 2100 or row.get("status") not in ("available","unavailable","failed","pending")):
+            continue
+        result.append({"key":group_key(row["conference"],row["year"]), "conference":row["conference"], "year":row["year"],
+                       "status":row["status"], "reason":str(row.get("reason", ""))[:500],
+                       "checked_at":str(row.get("checked_at", ""))[:64]})
+    return result
 
 
 def collect(args):
@@ -177,6 +206,82 @@ def collect(args):
         if not result["papers"]:
             raise ValueError("来源没有返回论文，已保留原有 site-data。")
         save_collections(result["papers"],args.data_dir,replace=True)
+
+
+def collect_batch(args):
+    conferences = list(dict.fromkeys(c.strip() for c in args.conferences.split(",") if c.strip()))
+    conferences = conferences or [name for name,entry in CATALOG.items() if entry["category"] in BATCH_AREAS]
+    years = sorted({int(y.strip()) for y in args.years.split(",") if y.strip()})
+    if set(conferences) - CATALOG.keys() or not years or any(not 1980 <= year <= 2100 for year in years):
+        raise ValueError("请选择有效的会议和年份。")
+    report_path = args.data_dir / "status" / "collections.json"
+    previous = read_json(report_path, {}).get("editions", [])
+    statuses = {item["key"]:item for item in previous}
+    pending, counts = [], {}
+    def persist():
+        atomic_json(report_path, {"schema_version":1, "source_url":"https://ccf.atom.im/", "updated_at":timestamp(),
+                                  "editions":sorted(statuses.values(),key=lambda item:(item["conference"],item["year"]))})
+    for conference in conferences:
+        for year in years:
+            key = group_key(conference,year)
+            path = args.data_dir / (key + ".json")
+            state = {"key":key,"conference":conference,"year":year,"checked_at":timestamp(),"status":"pending","count":0,"reason":""}
+            if path.exists() and not args.refresh_existing:
+                state.update(status="available",count=len(load_input(path)),reason="保留已有采集结果。")
+                print(f"{conference} {year}: 保留已有 {state['count']} 篇",flush=True)
+            else:
+                pending.append((conference,year))
+            statuses[key] = state
+    persist()
+    cache_dir = ROOT / "data" / "pages-cache"
+    with InstanceLock(cache_dir):
+        client, cancel = SafeClient(cache_dir), threading.Event()
+        rdf_editions = [(c,y) for c,y in pending if not (c in ("NSDI","FAST") or c in official.VIRTUAL or c == "ACM SIGOPS ATC" and y <= 2025)]
+        # Batch only the small count queries; paper pages remain bounded and serialized.
+        for offset in range(0,len(rdf_editions),8):
+            chunk = rdf_editions[offset:offset+8]
+            print(f"核对 DBLP 目录计数：{offset+1}–{offset+len(chunk)} / {len(rdf_editions)}",flush=True)
+            result = client.get("dblp_rdf", {"query":dblp_rdf.counts_query(chunk)}, "dblp:batch:counts", cancel, print)
+            counts.update({edition:0 for edition in chunk})
+            for row in result["results"]["bindings"]:
+                counts[(row["conf"]["value"],int(row["year"]["value"]))] = int(row["n"]["value"])
+        for conference,year in pending:
+            state = statuses[group_key(conference,year)]
+            official_url = proceedings.URLS.get((conference,year))
+            if counts.get((conference,year)) == 0 and not official_url:
+                state.update(status="unavailable",reason="DBLP 尚未收录该届会议目录；可能尚未公开或正在更新。",checked_at=timestamp())
+                persist(); print(f"{conference} {year}: {state['reason']}",flush=True); continue
+            papers = []
+            try:
+                if counts.get((conference,year)) == 0 and official_url:
+                    data = client.get("proceedings", {"conference":conference,"year":year,"parser_version":1}, "conference:accepted",cancel,print)
+                    records = {r["key"]:r for r in data["articles"]}
+                    for path in data.get("pages", []):
+                        part = client.get("proceedings", {"conference":conference,"year":year,"page":path,"parser_version":1}, "conference:accepted",cancel,print)
+                        records.update({r["key"]:r for r in part["articles"]})
+                    for record in records.values():
+                        paper = normalize(record,"ieee",conference,year)
+                        if paper:
+                            landing = record.get("landing_url") or official_url
+                            paper.update(source="conference_site",url=landing,publisher_url=landing,official_url=landing,
+                                         categories=record.get("program_labels",[]),category_sources=dict.fromkeys(record.get("program_labels",[]),official_url))
+                            papers.append(paper)
+                elif (conference,year) in counts:
+                    crawl_dblp_rdf(client,conference,year,False,cancel,lambda batch,*_:papers.extend(batch),print,
+                                   known_total=counts[(conference,year)],page_size=250)
+                else:
+                    source = "conference" if conference in official.VIRTUAL else "usenix"
+                    crawl_group(client,source,conference,year,False,"",cancel,lambda batch,*_:papers.extend(batch),print)
+                if not papers:
+                    raise CrawlError("来源未返回可发布的论文。")
+                save_collections(papers,args.data_dir,replace=True)
+                state.update(status="available",count=len(load_input(args.data_dir/(group_key(conference,year)+".json"))),reason="",checked_at=timestamp())
+            except CrawlError as error:
+                state.update(status="failed",reason=str(error),checked_at=timestamp())
+                print(f"{conference} {year}: {error}",flush=True)
+            persist()
+    summary = {status:sum(item["status"]==status for item in statuses.values()) for status in ("available","unavailable","failed","pending")}
+    print("批量结果：" + json.dumps(summary,ensure_ascii=False),flush=True)
 
 
 def analyze(args):
@@ -244,6 +349,10 @@ def main():
     collector.add_argument("--years",required=True,help="Comma-separated years.")
     collector.add_argument("--source",choices=["auto","conference","crossref","dblp","openreview","ieee","usenix"],default="conference")
     collector.add_argument("--skip-abstracts",action="store_true")
+    batch = sub.add_parser("collect-batch",help="Collect the five requested CCF A areas independently, without AI.")
+    batch.add_argument("--conferences",default="",help="Empty selects all CCF A venues in the five batch areas.")
+    batch.add_argument("--years",default="2025,2026")
+    batch.add_argument("--refresh-existing",action="store_true")
     analyzer = sub.add_parser("analyze",help="Precompute public topics and abstract summaries using DeepSeek.")
     analyzer.add_argument("--conferences",required=True)
     analyzer.add_argument("--years",required=True)
@@ -252,7 +361,7 @@ def main():
     analyzer.add_argument("--scope",choices=("featured","all"),default="featured",help="Featured classifications (excluding regular posters), or all papers with abstracts.")
     analyzer.add_argument("--dry-run",action="store_true",help="Show counts without contacting the AI service.")
     analyzer.add_argument("--force",action="store_true",help="Regenerate existing analyses within the limit.")
-    for item in (importer,builder,collector,analyzer):
+    for item in (importer,builder,collector,batch,analyzer):
         item.add_argument("--data-dir",type=Path,default=ROOT / "site-data")
     args = parser.parse_args()
     if args.command == "import":
@@ -260,6 +369,8 @@ def main():
         save_collections(papers,args.data_dir)
     elif args.command == "collect":
         collect(args)
+    elif args.command == "collect-batch":
+        collect_batch(args)
     elif args.command == "analyze":
         analyze(args)
     else:

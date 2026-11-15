@@ -42,8 +42,8 @@ def validate_options(body):
         raise ValueError("所选会议含 IEEE API 未适配的会议，请使用自动选择来源。")
     if source == "crossref" and not set(conferences) <= CROSSREF_VENUES:
         raise ValueError("Crossref 精确目录支持 INFOCOM、ICDE、SIGCOMM、MobiCom。混合选择请使用自动选择来源。")
-    if source == "usenix" and conferences != ["NSDI"]:
-        raise ValueError("USENIX 来源请只选择 NSDI。")
+    if source == "usenix" and not set(conferences) <= {"NSDI","FAST","ACM SIGOPS ATC"}:
+        raise ValueError("USENIX 来源支持 NSDI、FAST 和旧版 ATC。")
     if source == "openreview" and (not set(conferences) <= set(openreview.PREFIXES) or body.get("include_workshops")):
         raise ValueError("OpenReview 支持 ICLR、ICML、NeurIPS、ACL、AAAI、CVPR、ICCV、SIGIR、SIGKDD 的主会。混合选择请使用自动来源。")
     if source == "conference" and (not set(conferences) <= set(official.VIRTUAL) or body.get("include_workshops")):

@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pages
 from test_analysis import CONTENT, paper, transport
 from paperclaw.analysis import analyze_paper
-from paperclaw.core import normalize
+from paperclaw.core import atomic_json, normalize
 
 root = Path(__file__).resolve().parents[1] / "test-results/pages-browser"
 rows = []
@@ -24,5 +24,6 @@ rows.append(normalize({"key":"other", "title":"Another conference paper", "venue
                        "type":"Conference and Workshop Papers"}, "dblp", "ICDE", 2024))
 with contextlib.redirect_stdout(io.StringIO()):
     pages.save_collections(rows, root / "data", replace=True)
+    atomic_json(root/"data/status/collections.json", {"editions":[{"conference":"HPCA","year":2026,"status":"unavailable","reason":"尚未收录（测试）"}]})
     pages.build(root / "data", root / "paperclaw")
 print("Browser fixtures built in test-results/pages-browser/paperclaw")

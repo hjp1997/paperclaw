@@ -8,11 +8,11 @@ from urllib.parse import urljoin, urlsplit
 CATALOG = {r["name"]: r for r in json.loads(Path(__file__).with_name("conferences.json").read_text("utf-8"))}
 CATEGORIES = tuple(dict.fromkeys(r["category"] for r in CATALOG.values()))
 CROSSREF_VENUES = {"INFOCOM", "ICDE", "SIGCOMM", "MobiCom"}
-IEEE_VENUES = {"INFOCOM", "ICDE", "FOCS", "RTSS", "CVPR", "ICCV"}
+IEEE_VENUES = {"INFOCOM", "ICDE", "FOCS", "RTSS", "CVPR", "ICCV", "HPCA", "MICRO", "DAC", "SC"}
 for names, publisher, portal, prefix in [
     (IEEE_VENUES, "IEEE Xplore", "https://ieeexplore.ieee.org/", "10.1109"),
-    ({"SIGCOMM","MobiCom","WWW","STOC","LICS","SIGMOD","SIGKDD","SIGIR"}, "ACM Digital Library", "https://dl.acm.org/", "10.1145"),
-    ({"NSDI"}, "USENIX", "https://www.usenix.org/", ""),
+    ({"SIGCOMM","MobiCom","WWW","STOC","LICS","SIGMOD","SIGKDD","SIGIR","PPoPP","ASPLOS","ISCA","ACM SIGOPS ATC","EuroSys","HPDC"}, "ACM Digital Library", "https://dl.acm.org/", "10.1145"),
+    ({"NSDI","FAST"}, "USENIX", "https://www.usenix.org/", ""),
     ({"SODA"}, "SIAM", "https://epubs.siam.org/", "10.1137"),
     ({"CAV"}, "Springer", "https://link.springer.com/", "10.1007"),
     ({"AAAI"}, "AAAI", "https://ojs.aaai.org/", "10.1609"),
@@ -25,7 +25,7 @@ for names, publisher, portal, prefix in [
     for name in names:
         entry = CATALOG[name]
         provider = "crossref" if name in CROSSREF_VENUES else "dblp_rdf"
-        entry.update(provider="usenix" if name == "NSDI" else provider, publisher=publisher,
+        entry.update(provider="usenix" if name in ("NSDI","FAST") else provider, publisher=publisher,
                      publisher_site=portal, prefix=prefix, label=entry["category"] + " · CCF A")
 
 
@@ -105,8 +105,9 @@ def parse_catalog(text):
     return {"entries": entries, "source_url": "https://ccf.atom.im/"}
 
 
-def parse_usenix(text, year):
-    base = f"https://www.usenix.org/conference/nsdi{year % 100:02d}/"
+def parse_usenix(text, year, conference="NSDI"):
+    slug = {"NSDI":"nsdi", "FAST":"fast", "ACM SIGOPS ATC":"atc"}[conference]
+    base = f"https://www.usenix.org/conference/{slug}{year % 100:02d}/"
     records, seen = [], set()
     for article in Document(text).root.find(cls="node-paper"):
         headings = article.find("h2") or article.find("h3")
@@ -128,7 +129,7 @@ def parse_usenix(text, year):
         names = people[0].text(skip=("em", "i")) if people else ""
         authors = [re.sub(r"\s+", " ", name).strip(" ,;") for name in re.split(r"[,;]|\band\b", names)]
         pdfs = [urljoin(base, a.attrs.get("href", "")) for a in article.find("a") if urlsplit(a.attrs.get("href", "")).path.endswith(".pdf")]
-        records.append({"title": title, "publication_title": f"NSDI {year}", "publication_year": year,
+        records.append({"title": title, "publication_title": f"{conference} {year}", "publication_year": year,
                         "authors": {"authors": [{"full_name": n} for n in authors if n]},
                         "authors_text": authors_text, "program_labels": awards,
                         "abstract": plain(descriptions[0]) if descriptions else "",

@@ -1,6 +1,8 @@
 # PaperClaw · 会议论文采集
 
-本地 Python + 浏览器工具，按会议与年份获取论文目录、真实摘要和链接。左栏按领域折叠，支持 23 个 CCF A 类会议，可按领域全选或跨领域勾选单场会议。Python 3.10+，无需 pip 安装依赖。
+本地 Python + 浏览器工具，按会议与年份获取论文目录、真实摘要和链接。左栏按领域折叠，支持 34 个 CCF A 类会议，包括新增的 11 个体系结构/并行与分布计算/存储系统会议。可按领域全选或跨领域勾选单场会议。Python 3.10+，无需 pip 安装依赖。
+
+GitHub Pages 的采集、AI 分析和发布分别由 **Collect PaperClaw**、**Analyze PaperClaw**、**Publish PaperClaw** 三个独立 Action 负责。批量采集默认覆盖五个指定领域的 27 个会议、2025–2026 年，采集流程不读取 AI Key、不调用 AI。详情见 [部署说明](PAGES_DEPLOYMENT.md)。
 
 ## 启动
 

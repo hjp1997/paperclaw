@@ -19,7 +19,7 @@ git push -u origin main
 ```
 
 4. 打开仓库的 **Settings → Pages → Build and deployment → Source**，选择 **GitHub Actions**。
-5. 打开 **Actions → Publish PaperClaw → Run workflow**。选择 `main`，首次发布保持“发布前重新采集指定会议”关闭，再运行。
+5. 打开 **Actions → Publish PaperClaw → Run workflow**。选择 `main` 后运行；这个 Action 只构建和发布已有 JSON。
 6. 等待 `build`、`deploy` 两个任务成功。部署日志和仓库 Pages 设置会给出网站地址，格式为 `https://YOUR_USERNAME.github.io/paperclaw/`。
 
 第一次推送可能早于 Pages 设置完成。完成第 4 步后手动执行第 5 步即可。
@@ -44,16 +44,17 @@ git push
 
 ### 在 GitHub 中手动采集
 
-打开 **Actions → Publish PaperClaw → Run workflow**。
+打开 [Actions → Collect PaperClaw → Run workflow](https://github.com/hjp1997/paperclaw/actions/workflows/collect.yml)。
 
-- 勾选“发布前重新采集指定会议”。
-- 会议填 `ICLR`，年份填 `2025`，来源选择 `conference`，即可取得一个含摘要的官网目录。
-- 多个会议或年份使用英文逗号，例如 `ICLR,ICML` 和 `2025,2026`。
-- 包含 INFOCOM、ICDE、NSDI 等会议时选择 `auto`。`conference` 支持 ICLR、ICML、NeurIPS、CVPR、ICCV。
+- 会议留空时，覆盖体系结构/并行与分布计算/存储、网络、交叉/综合/新兴、理论、数据库/数据挖掘/内容检索五个领域的全部 CCF A 会议，共 27 个；默认年份为 `2025,2026`。
+- 也可指定会议，例如 `PPoPP,FAST,ASPLOS`。会议与年份均使用英文逗号分隔。
+- 默认保留已有组，仅补充缺失会议年份；需要更新已有组时勾选 `refresh_existing`。
+- NSDI、FAST 与 2025 年及以前的 ATC 使用 USENIX 技术目录；其余优先使用 DBLP 结构化目录。已适配的独立官网目录可在 DBLP 尚未收录时补充。
+- 自定义选择 ICLR、ICML、NeurIPS、CVPR、ICCV 时使用已适配的会议官网目录与摘要。
 
-流程将采集结果保存为 `site-data` 中的 JSON，提交到当前分支，并在同一轮任务中构建发布。公开页面只读取预采集数据。
+采集流程只访问论文元数据来源，不读取 `DEEPSEEK_API_KEY`，不调用 AI。每个会议年份独立保存，结果及状态报告提交到 `main`。成功结束后，通过 `workflow_run` 自动触发独立的 **Publish PaperClaw** 发布，避免 `GITHUB_TOKEN` 推送不能触发普通 push 工作流的问题。
 
-目录采集失败时，流程终止并保留原有 JSON 和线上版本。摘要覆盖以来源为准。部分年份官网目录只提供标题与链接，摘要需要先在本地逐篇更新后再导入。
+个别组失败时保留该组原有 JSON，继续采集其他组；尚未收录和失败原因保存在 `site-data/status/collections.json` 并展示于网页。不会创建空论文集冒充成功。报告中每个组有独立时间与状态。摘要覆盖以来源为准，DBLP 目录通常只有元数据；USENIX 目录可直接提供摘要。
 
 需要密钥时，在仓库 **Settings → Secrets and variables → Actions** 添加以下 Repository secrets。
 
@@ -63,12 +64,16 @@ git push
 | `IEEE_API_KEY` | 使用 `ieee` 来源 |
 | `DEEPSEEK_API_KEY` | 预生成 AI Topic 与中文摘要总结 |
 
-密钥通过采集步骤的环境变量使用。发布产物仅包含静态页面和白名单论文字段。
+批量采集 Action 不需要上述 Key；本地补摘要可按需使用 OpenAlex / IEEE Key，只有独立 AI 分析 Action 使用 `DEEPSEEK_API_KEY`。发布产物仅包含静态页面和白名单论文字段。
 
 本地也可以执行相同采集。
 
 ```powershell
 python pages.py collect --conferences ICLR --years 2025 --source conference
+# 批量补齐五个领域的 2025–2026 会议目录，无 AI 调用
+python pages.py collect-batch
+# 仅更新指定会议
+python pages.py collect-batch --conferences PPoPP,FAST --years 2025,2026 --refresh-existing
 python pages.py build
 ```
 
@@ -81,10 +86,10 @@ python pages.py build
 首次启用：
 
 1. 在仓库 [Settings → Secrets and variables → Actions](https://github.com/hjp1997/paperclaw/settings/secrets/actions) 添加 Repository secret `DEEPSEEK_API_KEY`，值填 DeepSeek Key。不要把密钥放入代码、论文字段或 workflow 输入。
-2. 打开 [Actions → Publish PaperClaw](https://github.com/hjp1997/paperclaw/actions/workflows/pages.yml)，点击 **Run workflow**。
-3. 若已有论文数据，保持“发布前重新采集指定会议”关闭。填会议、年份，例如 `ICLR` / `2025`。
-4. 勾选“生成 AI Topic 和中文摘要总结”，默认 `analysis_scope=featured`，只处理带特别分类的论文，排除仅有 Poster、Regular 或无标签的记录。Oral、Spotlight、Highlight、获奖等分类会纳入。选择 `all` 可处理所有有摘要论文。首次将本轮篇数设为 `5`，核对质量后可改为 `50` 或其他 1–1000 的值。
-5. 运行结束后，结果自动保存到 `site-data`、提交并发布。普通推送和不勾选 AI 的发布均不会调用模型；访客阅读预生成结果不需要 API Key。
+2. 打开 [Actions → Analyze PaperClaw](https://github.com/hjp1997/paperclaw/actions/workflows/analyze.yml)，点击 **Run workflow**。该 Action 只能手动运行。
+3. 填写已采集的会议、年份，例如 `ICML` / `2026`；这个 Action 不采集会议目录。
+4. 默认 `scope=featured`，只处理带特别分类的论文，排除仅有 Poster、Regular 或无标签的记录。Oral、Spotlight、Highlight、获奖等分类会纳入。选择 `all` 可处理所有有摘要论文。首次将 `limit` 设为 `5`，核对质量后可改为 `50` 或其他 1–1000 的值。
+5. 结果保存到 `site-data` 并提交，成功结束后自动触发独立发布 Action。采集、普通推送和手动发布均不会调用模型；访客阅读预生成结果不需要 API Key。
 
 没有摘要的论文自动跳过；标题、摘要、词表版本和模型未变化的已完成记录也会跳过。再次运行可接着处理剩余论文。每完成一篇就保存检查点；接口错误或格式错误会立即停止，不自动重试，也不添加重试暂停。工作流在失败时仍提交已完成的检查点，失败轮次不会替换线上版本。下一轮成功后继续发布。
 
@@ -142,7 +147,9 @@ python -m http.server 8766 --bind 127.0.0.1 --directory _site
 | `site-data/*.json` | 按会议和年份保存的公开论文数据 |
 | `site/` | 静态页面、筛选、导出和浏览器收藏 |
 | `pages.py` | 导入、预采集和构建 |
-| `.github/workflows/pages.yml` | 提交触发发布及手动采集发布 |
+| `.github/workflows/collect.yml` | 手动批量采集，无 AI 调用 |
+| `.github/workflows/analyze.yml` | 手动分析已采集论文，独立控制范围和费用 |
+| `.github/workflows/pages.yml` | 推送、手动操作或数据流程成功后构建发布 |
 | `_site/` | 构建产物，由 Actions 上传到 Pages |
 
 ## 常见问题
