@@ -12,7 +12,8 @@ from paperclaw import analysis
 from paperclaw.core import CrawlError, normalize
 
 
-CONTENT = {"topics": ["networking", "optimization"], "problem": "优化网络资源分配。",
+CONTENT = {"topics": ["networking", "optimization"],
+           "topic_evidence": {"networking": "network resource allocation", "optimization": "online scheduling"}, "problem": "优化网络资源分配。",
            "method": "通过在线算法进行调度。", "results": "摘要未报告具体结果。"}
 
 
@@ -53,6 +54,7 @@ class AnalysisTests(unittest.TestCase):
         for content, status, finish in [({**CONTENT, "topics": ["Oral"]}, 200, "stop"),
                                       ({**CONTENT, "topics": ["networking"] * 2}, 200, "stop"),
                                       ({**CONTENT, "results": ""}, 200, "stop"),
+                                      ({**CONTENT, "topic_evidence": {"networking": "invented quote", "optimization": "online scheduling"}}, 200, "stop"),
                                       ({**CONTENT, "method": "secret-test-key"}, 200, "stop"),
                                       (CONTENT, 200, "length"), (CONTENT, 429, "stop")]:
             with self.subTest(status=status, finish=finish, content=content):

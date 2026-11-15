@@ -188,7 +188,7 @@ function paperCard(p) {
     for (const id of p.ai_analysis.topics) {
       const chip = el("button", "ai-topic", manifest.topics?.[id] || id);
       chip.type = "button";
-      chip.title = "按此 AI Topic 筛选";
+      chip.title = "按此 AI Topic 筛选" + (p.ai_analysis.topic_evidence?.[id] ? " · " + p.ai_analysis.topic_evidence[id] : "");
       chip.onclick = () => { $("filterTopic").value = id; page = 1; render(); };
       topics.append(chip);
     }

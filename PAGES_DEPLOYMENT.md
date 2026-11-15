@@ -76,7 +76,7 @@ python pages.py build
 
 已接入 DeepSeek 官方 Chat Completions 接口，默认模型为 `deepseek-flash`，关闭思考并要求 JSON 输出。每篇只发送标题和摘要，生成 1–5 个 Topic 及中文研究问题、方法、结果三项总结。摘要没有报告具体结果时会要求模型明确写出这一点。总结按摘要级内容标记，不等同于全文评阅。
 
-网站支持 Topic 筛选、点击 Topic 标签筛选、搜索总结内容，以及随 CSV / Markdown / JSON 导出。AI Topic 独立于 Oral、Highlight、Best Paper 等会议官方分类。
+网站支持 Topic 筛选、点击 Topic 标签筛选、搜索总结内容，以及随 CSV / Markdown / JSON 导出。AI Topic 独立于 Oral、Highlight、Best Paper 等会议官方分类。每个 Topic 必须附带可在标题或摘要中找到的原文依据，鼠标悬停标签可查看；模型虚构或改写的引文不会通过校验。
 
 首次启用：
 
