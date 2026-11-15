@@ -3,13 +3,28 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from paperclaw.abstracts import enrich_abstracts, reconstruct
+from paperclaw.abstracts import enrich_abstracts, enrich_titles, reconstruct
 from paperclaw.catalog import Document, plain, parse_catalog, parse_usenix
 from paperclaw.core import CrawlError, SafeClient, crawl_group, normalize
 from paperclaw.server import Application, validate_options
 
 
 class EnrichmentTests(unittest.TestCase):
+    def test_title_search_requires_full_title_author_year_and_unique_record(self):
+        paper = {"id":"original-id","title":"Unique Systems Paper","authors":["Alice Example 0001"],"year":2026,"abstract":"","doi":""}
+        good = {"id":"https://openalex.org/W1","doi":"https://doi.org/10.1145/123","title":paper["title"],"publication_year":2026,
+                "authorships":[{"author":{"display_name":"Alice Example"}}],"abstract_inverted_index":{"Full":[0],"abstract.":[1]}}
+        class Client:
+            rows = []
+            def get(self,*args): return {"meta":{"count":len(self.rows)},"results":self.rows}
+        client=Client()
+        for rows,expected in [([good],True),([dict(good,title="Different title")],False),([dict(good,publication_year=2020)],False),
+                              ([dict(good,authorships=[])],False),([good,dict(good,id="https://openalex.org/W2")],False)]:
+            client.rows=rows;updated=[]
+            enrich_titles(client,[paper],threading.Event(),updated.extend,lambda m:None)
+            self.assertEqual(bool(updated[0]["abstract"]),expected)
+            self.assertEqual(updated[0]["id"],paper["id"])
+
     def test_index_order_repetition_and_malformed_positions(self):
         self.assertEqual(reconstruct({"networks": [1, 3], "We": [0], "study": [2]}), "We networks study networks")
         for index in ({"a": [1]}, {"a": [0], "b": [0]}, {"a": [-1]}, {"a": [True]}, {"a": [50000]}, None):
@@ -41,11 +56,11 @@ class EnrichmentTests(unittest.TestCase):
             return 200, {}, json.dumps({"meta": {"count": 0}, "results": []}).encode()
         with tempfile.TemporaryDirectory() as directory:
             client = SafeClient(directory, transport=transport, interval=0)
-            papers = [{"id": str(i), "doi": f"10.1/{i}", "abstract": ""} for i in range(51)]
+            papers = [{"id": str(i), "doi": f"10.1/{i}", "abstract": ""} for i in range(101)]
             for key in ("secret-one", "secret-two"):
                 enrich_abstracts(client, papers, threading.Event(), updated.extend, lambda m: None, key)
             self.assertEqual(len(calls), 2)
-            self.assertEqual(len(updated), 102)
+            self.assertEqual(len(updated), 202)
             self.assertTrue(all("secret" not in p.read_text() for p in Path(directory).rglob("*.json")))
 
     def test_failed_enrichment_preserves_metadata(self):

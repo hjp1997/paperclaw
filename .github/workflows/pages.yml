@@ -12,7 +12,7 @@ on:
       - ".github/workflows/**"
   workflow_dispatch:
   workflow_run:
-    workflows: [Collect PaperClaw, Analyze PaperClaw]
+    workflows: [Collect PaperClaw, Enrich PaperClaw, Analyze PaperClaw]
     types: [completed]
 
 permissions:

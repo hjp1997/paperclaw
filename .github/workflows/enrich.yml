@@ -1,0 +1,87 @@
+name: Enrich PaperClaw
+
+on:
+  workflow_dispatch:
+    inputs:
+      conferences:
+        description: "会议简称，英文逗号分隔；留空处理全部已采集会议"
+        type: string
+        default: ""
+      years:
+        description: "年份，英文逗号分隔"
+        type: string
+        default: "2025,2026"
+      source:
+        description: "auto=公开索引后读取官网；pages=仅论文官网"
+        type: choice
+        options: [auto, openalex, pages]
+        default: auto
+      limit:
+        description: "本轮最多处理缺失摘要论文数；0 表示全部"
+        type: string
+        default: "500"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: paperclaw-data
+  cancel-in-progress: false
+
+jobs:
+  enrich:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Validate paper processing
+        run: python -m unittest discover -s tests -q
+      - name: Restore collector cache
+        uses: actions/cache@v4
+        with:
+          path: data/pages-cache
+          key: paperclaw-collector-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            paperclaw-collector-${{ runner.os }}-
+      - name: Fill missing source abstracts without AI
+        id: enrich
+        continue-on-error: true
+        env:
+          PAGES_CONFERENCES: ${{ inputs.conferences }}
+          PAGES_YEARS: ${{ inputs.years }}
+          ABSTRACT_SOURCE: ${{ inputs.source }}
+          ABSTRACT_LIMIT: ${{ inputs.limit }}
+          OPENALEX_API_KEY: ${{ secrets.OPENALEX_API_KEY }}
+        run: python -u pages.py enrich --conferences "$PAGES_CONFERENCES" --years "$PAGES_YEARS" --source "$ABSTRACT_SOURCE" --limit "$ABSTRACT_LIMIT"
+      - name: Save abstract checkpoints and report
+        if: "!cancelled() && (steps.enrich.outcome == 'success' || steps.enrich.outcome == 'failure')"
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add site-data
+          if ! git diff --cached --quiet; then
+            git commit -m "Enrich source abstracts without AI"
+            git push origin HEAD:main
+          fi
+      - name: Summarize abstract coverage
+        if: "!cancelled() && (steps.enrich.outcome == 'success' || steps.enrich.outcome == 'failure')"
+        env:
+          ENRICH_OUTCOME: ${{ steps.enrich.outcome }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path("site-data/status/abstracts.json")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output:
+              output.write(f"Source lookup: **{os.environ['ENRICH_OUTCOME']}**. Successful checkpoints are published even if a source stops.\n\n")
+              if path.exists():
+                  data = json.loads(path.read_text())
+                  output.write(f"Abstracts: **{data['with_abstract']} / {data['total']}**; remaining: **{data['remaining']}**.\n\n")
+                  if data.get("message"): output.write(data["message"] + "\n\n")
+                  for source in data.get("blocked_sources", []):
+                      output.write(f"- [{source['host']}]({source['url']}): {source['reason']}\n")
+          PY

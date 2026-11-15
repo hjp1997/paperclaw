@@ -13,6 +13,23 @@ from test_core import record
 
 
 class PagesTests(unittest.TestCase):
+    def test_abstract_checkpoint_survives_upstream_failure_and_resume_skips_checked(self):
+        from paperclaw.core import CrawlError
+        import contextlib
+        with contextlib.redirect_stdout(io.StringIO()): pages.save_collections([self.paper],self.data)
+        args=SimpleNamespace(conferences="INFOCOM",years="2025",limit=0,force=False,source="openalex",data_dir=self.data)
+        def partial(client,papers,cancel,update,*args):
+            update([dict(papers[0],abstract="Source abstract.",abstract_source="openalex",abstract_status="available")])
+            raise CrawlError("Network interrupted")
+        with patch("pages.InstanceLock",return_value=contextlib.nullcontext()),patch("pages.SafeClient"),patch("pages.enrich_abstracts",side_effect=partial),contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(CrawlError): pages.enrich(args)
+        self.assertEqual(pages.load_input(self.data/"infocom-2025.json")[0]["abstract"],"Source abstract.")
+        report=json.loads((self.data/"status"/"abstracts.json").read_bytes())
+        self.assertEqual((report["status"],report["with_abstract"]),("partial",1))
+        with patch("pages.InstanceLock",return_value=contextlib.nullcontext()),patch("pages.SafeClient"),patch("pages.enrich_abstracts") as retry,patch("pages.enrich_titles"),contextlib.redirect_stdout(io.StringIO()):
+            pages.enrich(args)
+        self.assertEqual(retry.call_args.args[1],[])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

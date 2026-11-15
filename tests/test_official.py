@@ -10,6 +10,38 @@ from paperclaw.program import parse_program
 
 
 class OfficialTests(unittest.TestCase):
+    def test_sc_springer_ieee_and_structured_abstracts(self):
+        sc=b'<meta property="og:title" content="Presentation"><h1>Presentation</h1><div class="presentation-title">Actual paper</div><span class="abstract">Full description.</span>'
+        self.assertEqual(parse_page(sc,"https://sc26.conference-program.com/presentation/?id=pap1")["title"],"Actual paper")
+        springer=b'<h1>Actual paper</h1><section data-title="Abstract"><p>Full abstract.</p></section><section data-title="Introduction"><div class="c-article-section__content">Unrelated longer body content.</div></section>'
+        self.assertEqual(parse_page(springer,"https://link.springer.com/chapter/10.1007/a")["abstract"],"Full abstract.")
+        ieee=b'<script>xplGlobal.document.metadata={"title":"Actual paper","abstract":"Full abstract.","doi":"10.1109/a"};</script>'
+        self.assertEqual(parse_page(ieee,"https://ieeexplore.ieee.org/document/1")["doi"],"10.1109/a")
+        structured=b'<meta name="dc.description" content="Short excerpt"><script type="application/ld+json">{"@type":"ScholarlyArticle","headline":"Actual paper","abstract":"Full abstract. Final sentence."}</script>'
+        self.assertEqual(parse_page(structured,"https://dl.acm.org/doi/1")["abstract"],"Full abstract. Final sentence.")
+
+    def test_publisher_redirect_counts_each_request_and_rejects_login_host(self):
+        from paperclaw.core import AccessError
+        from pathlib import Path
+        calls=[]
+        def transport(url):
+            calls.append(url)
+            if "doi.org" in url: return 302,{"Location":"https://ieeexplore.ieee.org/document/1"},b""
+            return 200,{},b'<h1>Actual paper</h1><div class="abstract">Full abstract.</div>'
+        with tempfile.TemporaryDirectory() as directory:
+            client=SafeClient(directory,transport=transport,interval=0)
+            result=client.get("paper_page",{"url":"https://doi.org/10.1109/a"},"test",threading.Event())
+            self.assertEqual(result["url"],"https://ieeexplore.ieee.org/document/1")
+            self.assertEqual(len(json.loads((Path(directory)/"policy.json").read_text())["requests"]),2)
+        with tempfile.TemporaryDirectory() as directory:
+            calls.clear()
+            def login(url):
+                calls.append(url);return 303,{"Location":"https://idp.springer.com/authorize?private=1"},b""
+            client=SafeClient(directory,transport=login,interval=0)
+            with self.assertRaises(AccessError):
+                client.get("paper_page",{"url":"https://link.springer.com/chapter/10.1007/a"},"test",threading.Event())
+            self.assertEqual(len(calls),1)
+
     def test_separate_official_abstract_index_matches_event_ids_and_skips_session_heading(self):
         from paperclaw.official import records
         from paperclaw.program import program_url

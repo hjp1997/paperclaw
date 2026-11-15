@@ -1,6 +1,7 @@
 """Conference catalogs and verifiable paper landing pages."""
 import re
-from urllib.parse import urlsplit
+import json
+from urllib.parse import urlsplit, urlunsplit
 from xml.etree import ElementTree
 
 from .catalog import Document, plain
@@ -8,7 +9,9 @@ from .program import VIRTUAL, apply_program, title_key
 
 PAGE_HOSTS = {"arxiv.org", "www.arxiv.org", "aclanthology.org", "eccc.weizmann.ac.il",
               "proceedings.mlr.press", "proceedings.neurips.cc", "dl.acm.org", "ieeexplore.ieee.org",
-              "iclr.cc", "icml.cc", "neurips.cc", "cvpr.thecvf.com", "iccv.thecvf.com", "www.usenix.org"}
+              "iclr.cc", "icml.cc", "neurips.cc", "cvpr.thecvf.com", "iccv.thecvf.com", "www.usenix.org",
+              "doi.org", "link.springer.com", "link.springernature.com", "epubs.siam.org", "www.vldb.org",
+              "sc26.conference-program.com", "openaccess.thecvf.com", "ojs.aaai.org"}
 
 
 def allowed_page(url):
@@ -25,18 +28,63 @@ def parse_page(raw, url):
         name = (tag.attrs.get("name") or tag.attrs.get("property") or "").lower()
         if name and tag.attrs.get("content"):
             metadata[name] = tag.attrs["content"]
-    headings = root.find("h1")
-    title = metadata.get("citation_title") or metadata.get("dc.title") or metadata.get("og:title") or (plain(headings[0]) if headings else "")
-    abstracts = root.find(cls="abstract") or root.find(cls="abstractSection")
+    headings = root.find(cls="presentation-title") or root.find("h1")
+    title = metadata.get("citation_title") or metadata.get("dc.title") or (plain(headings[0]) if headings else "") or metadata.get("og:title")
+    abstracts = root.find(cls="abstract") or root.find(cls="abstractSection") or root.find(cls="c-article-section__content")
+    # Springer has several section bodies; only the Abstract section is relevant.
+    if urlsplit(url).hostname in ("link.springer.com","link.springernature.com"):
+        sections = [n for n in root.find("section") if n.attrs.get("data-title", "").casefold() == "abstract" or n.attrs.get("id") == "Abs1"]
+        abstracts = sections
     abstracts += [node for node in root.find() if node.attrs.get("id") in ("abstract", "abstract_details", "abstractText")]
     body = [plain(node) for node in abstracts if plain(node)]
     abstract = max(body, key=len) if body else (metadata.get("citation_abstract") or metadata.get("dc.description") or "")
+    for script in root.find("script"):
+        text = "".join(c for c in script.children if isinstance(c,str))
+        payloads = []
+        if script.attrs.get("type") == "application/ld+json":
+            try:
+                data = json.loads(text)
+                payloads = data if isinstance(data,list) else [data]
+                payloads += [n for d in list(payloads) if isinstance(d,dict) for n in d.get("@graph",[]) if isinstance(n,dict)]
+            except (ValueError,TypeError): pass
+        elif "xplGlobal.document.metadata" in text:
+            match = re.search(r"xplGlobal\.document\.metadata\s*=\s*",text)
+            if match:
+                try: payloads = [json.JSONDecoder().raw_decode(text[match.end():])[0]]
+                except ValueError: pass
+        for data in payloads:
+            if not isinstance(data,dict): continue
+            if script.attrs.get("type") == "application/ld+json" and not set([data.get("@type")] if isinstance(data.get("@type"),str) else data.get("@type",[])) & {"ScholarlyArticle","Article"}: continue
+            if data.get("abstract"):
+                # A complete structured abstract beats short description metadata.
+                abstract = plain(Document(str(data["abstract"])).root)
+                title = data.get("headline") or data.get("title") or data.get("name") or title
+                metadata["citation_doi"] = data.get("doi") or metadata.get("citation_doi", "")
     abstract = re.sub(r"^\s*Abstract\s*[:：]?\s*", "", abstract, flags=re.I)
     title = re.sub(r"^\s*Title\s*[:：]?\s*", "", title, flags=re.I)
     if not title or not abstract:
         raise ValueError("Paper title and abstract not found")
     return {"title":clean(title), "abstract":clean(abstract), "url":url,
             "doi":metadata.get("citation_doi", ""), "authors":[plain(n) for n in root.find(cls="authors")]}
+
+
+def page_candidates(paper):
+    candidates = [paper.get("official_url"),paper.get("publisher_url"),paper.get("url")]
+    doi = paper.get("doi", "")
+    if doi:
+        host = ("https://dl.acm.org/doi/" if doi.lower().startswith("10.1145/") else
+                "https://link.springer.com/chapter/" if doi.lower().startswith("10.1007/") else
+                "https://epubs.siam.org/doi/" if doi.lower().startswith("10.1137/") else "https://doi.org/")
+        candidates.append(host+doi)
+    result = []
+    for candidate in candidates:
+        if not candidate: continue
+        parsed = urlsplit(candidate)
+        if parsed.hostname == "sc26.conference-program.com" and parsed.path == "/":
+            candidate = urlunsplit(("https",parsed.netloc,"/presentation/",parsed.query,""))
+        if allowed_page(candidate) and not urlsplit(candidate).path.lower().endswith(".pdf") and candidate not in result:
+            result.append(candidate)
+    return result
 
 
 def parse_arxiv(raw):

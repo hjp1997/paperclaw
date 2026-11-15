@@ -51,10 +51,15 @@ class Cancelled(CrawlError):
 
 
 class AccessError(CrawlError):
-    def __init__(self, message, source, kind):
+    def __init__(self, message, source, kind, url=""):
         super().__init__(message)
         self.source = source
         self.kind = kind
+        self.url = url
+
+
+class PageError(CrawlError):
+    """A public landing page did not expose a verifiable abstract."""
 
 
 def atomic_json(path, value):
@@ -130,6 +135,27 @@ class SafeClient:
         with self.lock:
             atomic_json(self.query_cache_file(source, params), {"time": self.clock(), "data": data})
 
+    def reserve_request(self, cancel, progress):
+        now = self.clock()
+        try:
+            policy = read_json(self.policy_file, {"requests": []})
+            requests = [t for t in policy["requests"] if now - t < DAY]
+        except (ValueError, KeyError, TypeError):
+            raise CrawlError("限速状态文件损坏，已停止请求。请保留 policy.json 并检查文件。") from None
+        if len(requests) >= 300:
+            raise CrawlError("已达到 24 小时 300 次请求上限，请稍后再试。缓存仍可使用。")
+        delay = max(0, (requests[-1] + self.interval - now) if requests else 0)
+        if delay:
+            progress(f"限速等待 {delay:.0f} 秒")
+            if cancel.wait(delay):
+                raise Cancelled("已停止，已采集结果仍可导出。")
+        if cancel.is_set():
+            raise Cancelled("已停止，已采集结果仍可导出。")
+        now = self.clock()
+        # Ignore and retire cooldown fields from earlier versions.
+        policy = {"requests": requests + [now]}
+        atomic_json(self.policy_file, policy)  # Count failed attempts too.
+
     def get(self, source, params, scope, cancel, progress=lambda message: None, *, cache=True):
         public_params = {k: v for k, v in params.items() if k not in ("apikey", "api_key")}
         cache_key = hashlib.sha256(json.dumps([source, public_params], sort_keys=True).encode()).hexdigest()
@@ -146,24 +172,7 @@ class SafeClient:
             if cached and 0 <= now - cached.get("time", 0) < ttl:
                 progress("读取 1 小时内的 OpenReview 缓存" if source.startswith("openreview") else "读取 24 小时内的缓存")
                 return cached["data"]
-            try:
-                policy = read_json(self.policy_file, {"requests": []})
-                requests = [t for t in policy["requests"] if now - t < DAY]
-            except (ValueError, KeyError, TypeError):
-                raise CrawlError("限速状态文件损坏，已停止请求。请保留 policy.json 并检查文件。") from None
-            if len(requests) >= 300:
-                raise CrawlError("已达到 24 小时 300 次请求上限，请稍后再试。缓存仍可使用。")
-            delay = max(0, (requests[-1] + self.interval - now) if requests else 0)
-            if delay:
-                progress(f"限速等待 {delay:.0f} 秒")
-                if cancel.wait(delay):
-                    raise Cancelled("已停止，已采集结果仍可导出。")
-            if cancel.is_set():
-                raise Cancelled("已停止，已采集结果仍可导出。")
-            now = self.clock()
-            # Ignore and retire cooldown fields from earlier versions.
-            policy = {"requests": requests + [now]}
-            atomic_json(self.policy_file, policy)  # Count failed attempts too.
+            self.reserve_request(cancel, progress)
             limit = 96 * 1024 * 1024 if source in ("program","proceedings") else MAX_RESPONSE
             if source == "paper_page":
                 url = params["url"]
@@ -187,6 +196,15 @@ class SafeClient:
                 status, headers, raw = self.transport(url, max_response=limit)
             else:
                 status, headers, raw = self.transport(url)
+            if source == "paper_page":
+                for _ in range(3):
+                    if status not in (301,302,303,307,308): break
+                    target = urllib.parse.urljoin(url, header(headers,"Location"))
+                    if not official.allowed_page(target):
+                        raise AccessError("论文页面跳转到登录或未支持的网站，请在浏览器中打开原文链接核对。",source,"login",url)
+                    self.reserve_request(cancel,progress)
+                    url = target
+                    status,headers,raw = self.transport(url)
             text = raw[:8192].decode("utf-8", errors="replace").lower()
             looks_json = raw.lstrip().startswith((b"{", b"["))
             api_error = {}
@@ -242,7 +260,7 @@ class SafeClient:
                     reason += "。请检查 API Key 及接口权限"
                 elif login or status == 401:
                     kind = "login"
-                raise AccessError(reason + "。本轮已停止，可手动继续。", source, kind)
+                raise AccessError(reason + "。本轮已停止，可手动继续。", source, kind, url if source == "paper_page" else "")
             if status != 200:
                 raise CrawlError(f"来源返回 HTTP {status}；本轮已停止，没有自动重试。")
             if len(raw) > limit:
@@ -257,6 +275,8 @@ class SafeClient:
                         parse_catalog(raw.decode("utf-8")) if source == "ccf" else json.loads(raw))
                 validate_payload(source, data)
             except (ValueError, TypeError, KeyError):
+                if source == "paper_page":
+                    raise PageError("论文页面未提供可核对的标题与摘要。") from None
                 raise CrawlError("来源未返回有效的论文数据（可能是验证页面、页面结构变化或 API Key 错误）；没有将失败记为 0 篇。") from None
             # Persist only bibliographic responses; never the URL or API key.
             if cache:

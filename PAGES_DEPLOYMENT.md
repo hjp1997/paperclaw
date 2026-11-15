@@ -77,6 +77,27 @@ python pages.py collect-batch --conferences PPoPP,FAST --years 2025,2026 --refre
 python pages.py build
 ```
 
+## 单独补全原文摘要
+
+DBLP 提供论文目录，不提供摘要。打开 [Actions → Enrich PaperClaw](https://github.com/hjp1997/paperclaw/actions/workflows/enrich.yml)，选择会议、年份、来源和篇数上限后运行；此操作不调用 AI。
+
+- `auto`：先读取已适配的会议官网摘要索引，再按 DOI 查询 OpenAlex；没有 DOI 时要求完整标题、作者及相邻年份唯一匹配，最后访问仍缺失的论文落地页。
+- `openalex`：只查询公开索引，适合大批量补齐。来源索引可能只有摘要首段，来源链接始终保留。
+- `pages`：只读取论文落地页，支持 IEEE 页面元数据、ACM 摘要区域、Springer Abstract 章节、SC 议程 Description、PMLR 等已适配页面。只接收标题一致、DOI 不冲突的摘要，不读取付费全文。
+- 已有摘要和论文 ID 保留；成功批次即时保存。成功核验但无摘要的记录 24 小时内跳过同一来源，网络错误或登录拦截不视为“无摘要”。每次重跑继续缺失项。保持正常请求间隔，不添加重试暂停、不自动重试。
+- `limit=0` 表示处理全部缺失记录，运行仍受统一的 24 小时 300 次请求限制。每个 DOI 批次最多 100 篇；单篇官网通常每篇至少一次请求，可分多轮运行。
+
+如来源中断，工作流保存并发布已完成批次，运行摘要和 `site-data/status/abstracts.json` 显示覆盖率及中断原因。受限出版社记录示例链接与原因，并在该轮跳过该网站，避免逐篇重复触发验证。可选 Repository secret `OPENALEX_API_KEY` 只传给 OpenAlex，不会发布到网站。
+
+本地执行同一补全流程：
+
+```powershell
+python pages.py enrich --limit 0 --source openalex
+python pages.py enrich --conferences SC --years 2026 --source pages --limit 100
+```
+
+校园网 IP 有时直接提供访问权限；机构登录则由你在浏览器完成。GitHub Actions 位于远程服务器，无法使用你本机的校园网或浏览器登录状态。本地 Python 请求也不会自动继承浏览器 Cookie；不会将校园网密码、Cookie 或完整登录网页写入仓库。需要登录的来源可在同一浏览器查看原文、导出含摘要的引用或整理为当前 JSON 格式，再通过 `pages.py import` 合并；登录成功不等于远程 Action 获得了权限。
+
 ## 预生成 Topic 和摘要级总结
 
 已接入 DeepSeek 官方 Chat Completions 接口，默认模型为 `deepseek-flash`，关闭思考并要求 JSON 输出。每篇只发送标题和摘要，生成 1–5 个 Topic、研究关键词短语及中文研究问题、方法、结果三项总结。研究短语必须逐字出现在标题或摘要中。摘要没有报告具体结果时会要求模型明确写出这一点。总结按摘要级内容标记，不等同于全文评阅。

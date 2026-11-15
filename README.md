@@ -2,7 +2,7 @@
 
 本地 Python + 浏览器工具，按会议与年份获取论文目录、真实摘要和链接。左栏按领域折叠，支持 34 个 CCF A 类会议，包括新增的 11 个体系结构/并行与分布计算/存储系统会议。可按领域全选或跨领域勾选单场会议。Python 3.10+，无需 pip 安装依赖。
 
-GitHub Pages 的采集、AI 分析和发布分别由 **Collect PaperClaw**、**Analyze PaperClaw**、**Publish PaperClaw** 三个独立 Action 负责。批量采集默认覆盖五个指定领域的 27 个会议、2025–2026 年，采集流程不读取 AI Key、不调用 AI。详情见 [部署说明](PAGES_DEPLOYMENT.md)。
+GitHub Pages 的目录采集、原文摘要补全、AI 分析和发布分别由 **Collect PaperClaw**、**Enrich PaperClaw**、**Analyze PaperClaw**、**Publish PaperClaw** 四个独立 Action 负责。批量采集默认覆盖五个指定领域的 27 个会议、2025–2026 年，采集和补摘要不读取 AI Key、不调用 AI。详情见 [部署说明](PAGES_DEPLOYMENT.md)。
 
 ## 启动
 
@@ -53,9 +53,9 @@ OpenReview 返回 `ChallengeRequiredError` 时，需要 API 请求本身完成�
 
 Crossref 覆盖出版商登记的跨学科 DOI 记录；DBLP 专注计算机领域会议与期刊目录，也收录没有 DOI 的论文。两者不存在对所有会议都成立的“更全”：找计算机会议目录优先参考 DBLP / 官方目录，补 DOI 元数据用 Crossref。DBLP 明确不提供摘要，Crossref 的摘要依赖出版商是否提交。
 
-摘要使用来源原文，不由 AI 生成。已有摘要优先保留，缺失项每批最多 50 个 DOI 向 OpenAlex 查询，只接受 DOI 精确匹配。成功查询但没有摘要标记为 `unavailable`，请求失败保留 `not_checked`，不会把限流误报为“摘要不存在”。每批保存，停止或限流后可以继续。NSDI 直接读取官方摘要，上下标保留为 `^(...)` / `_(...)`，防止 10 的 6 次方误写成 106。CSV / Markdown / JSON 都包含摘要、摘要来源及来源链接。
+摘要使用来源原文，不由 AI 生成。已有摘要优先保留，缺失项每批最多 100 个 DOI 向 OpenAlex 查询，只接受 DOI 精确匹配。成功查询但没有摘要标记为 `unavailable`，请求失败保留原状态，不会把限流误报为“摘要不存在”。每批保存，停止或限流后可以继续。NSDI 直接读取官方摘要，上下标保留为 `^(...)` / `_(...)`，防止 10 的 6 次方误写成 106。CSV / Markdown / JSON 都包含摘要、摘要来源及来源链接。
 
-**OpenAlex 匿名额度很小，批量补全可能返回 429。** 在页面的 OpenAlex Key 栏填写自己的 Key 后重新点击补全；也可以等待来源额度恢复。Key 只用于当前操作，不保存。没有 DOI 的记录不能用 OpenAlex 精确补全。没有摘要时关键词为本地标题提取，有摘要时用标题和摘要提取；IEEE 返回作者关键词时优先保留。
+**OpenAlex 有访问额度，批量补全可能返回 429。** 在页面的 OpenAlex Key 栏填写自己的 Key 后重新点击补全；也可以等待来源额度恢复。Key 只用于当前操作，不保存。独立补摘要 Action 对没有 DOI 的记录采用标题检索，并要求完整标题、作者及相邻年份唯一匹配；候选不唯一时不写入。没有摘要时关键词为本地标题提取，有摘要时用标题和摘要提取；IEEE 返回作者关键词时优先保留。
 
 默认排除 Workshop、论文集整本记录、常见序言与目录。主会论文集可能包含 Research、Short、Demo 等类别；接口没有可靠细分类时不推断。没有 Oral / Poster / Best Paper 等数据时不生成这些标签。年份使用来源的出版年份；最新年份可能尚未收录完整。DBLP 的来源总条数包含被过滤的记录，因此可能大于最终论文数。
 

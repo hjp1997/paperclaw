@@ -10,10 +10,12 @@ import threading
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from paperclaw.catalog import CATALOG
-from paperclaw.core import EXPORT_FIELDS, CrawlError, SafeClient, atomic_json, crawl_dblp_rdf, crawl_group, normalize, read_json, safe_url
+from paperclaw.core import EXPORT_FIELDS, AccessError, PageError, CrawlError, SafeClient, atomic_json, crawl_dblp_rdf, crawl_group, normalize, read_json, safe_url
 from paperclaw import dblp_rdf, official, proceedings
+from paperclaw.abstracts import enrich_abstracts, enrich_titles, doi_key
 from paperclaw.analysis import MODEL, TOPICS, analyze_paper, is_featured, public_analysis
 from paperclaw.instance import InstanceLock
 from paperclaw.server import Application
@@ -24,6 +26,7 @@ ROOT = Path(__file__).resolve().parent
 BATCH_AREAS = {"计算机体系结构/并行与分布计算/存储系统", "计算机网络", "交叉/综合/新兴", "计算机科学理论", "数据库/数据挖掘/内容检索"}
 PUBLIC_FIELDS = set(EXPORT_FIELDS) - {"ai_summary", "title_text"}
 PUBLIC_FIELDS.update(("id", "title_official", "official_url"))
+PUBLIC_FIELDS.add("abstract_checked_at")
 
 
 def timestamp():
@@ -50,6 +53,10 @@ def public_paper(paper):
         raise ValueError("分类来源格式错误。")
     result["category_sources"] = {k:safe_url(v) for k,v in sources.items()
                                   if isinstance(k,str) and isinstance(v,str) and safe_url(v)}
+    checks = paper.get("abstract_sources_checked", {})
+    if isinstance(checks,dict):
+        result["abstract_sources_checked"] = {name:date for name,date in checks.items()
+            if name in ("openalex","openalex_title","conference_site","paper_page","arxiv","crossref") and isinstance(date,str) and len(date)<=64}
     if not isinstance(result.get("id"), str) or not result["id"]:
         identity = paper.get("doi") or f"{conference}/{year}/{paper['title']}"
         result["id"] = hashlib.sha256(str(identity).encode()).hexdigest()[:24]
@@ -337,6 +344,92 @@ def analyze(args):
     print(f"本轮生成 {done} 篇；剩余 {pending_count-done} 篇可再次运行继续。", flush=True)
 
 
+def enrich(args):
+    conferences = {c.strip() for c in args.conferences.split(",") if c.strip()}
+    years = {int(y.strip()) for y in args.years.split(",") if y.strip()}
+    if conferences - CATALOG.keys() or not years or any(not 1980 <= year <= 2100 for year in years) or args.limit < 0:
+        raise ValueError("请选择有效会议、年份和非负篇数上限；0 表示全部。")
+    collections, index = {}, {}
+    for path in sorted(args.data_dir.glob("*.json")):
+        rows = load_input(path)
+        if rows[0]["year"] not in years or conferences and rows[0]["conference"] not in conferences: continue
+        collections[path] = (read_json(path,{}),rows)
+        for paper in rows: index[(paper["conference"],paper["year"],paper["id"])] = (path,paper)
+    now = datetime.now(timezone.utc)
+    def eligible(paper, source):
+        checked = paper.get("abstract_sources_checked",{}).get(source, "")
+        try: recent = checked and 0 <= (now-datetime.fromisoformat(checked)).total_seconds() < 86400
+        except (ValueError,TypeError): recent = False
+        return not paper["abstract"] and (args.force or not recent)
+    pending = [p for _,p in index.values() if not p["abstract"]]
+    if args.limit: pending = pending[:args.limit]
+    if not collections: raise ValueError("尚无所选会议年份的数据，请先采集。")
+    report_path = args.data_dir/"status"/"abstracts.json"
+    blocked = {}
+    initial = sum(bool(p["abstract"]) for _,p in index.values())
+    def report(status, message=""):
+        rows = [p for _,items in collections.values() for p in items]
+        atomic_json(report_path, {"updated_at":timestamp(),"status":status,"message":message,
+            "total":len(rows),"with_abstract":sum(bool(p["abstract"]) for p in rows),
+            "remaining":sum(not bool(p["abstract"]) for p in rows),"added":sum(bool(p["abstract"]) for p in rows)-initial,
+            "blocked_sources":list({v["host"]:v for v in blocked.values()}.values())})
+    def update(batch):
+        changed = set()
+        for paper in batch:
+            path,original = index[(paper["conference"],paper["year"],paper["id"])]
+            original.update(paper); changed.add(path)
+        for path in changed:
+            metadata, rows = collections[path]
+            metadata.update(papers=rows,updated_at=timestamp())
+            atomic_json(path,metadata)
+        report("running")
+    cache_dir = ROOT/"data"/"pages-cache"
+    print(f"本轮补全 {len(pending)} 篇缺失的原文摘要，不调用 AI。",flush=True)
+    report("running")
+    with InstanceLock(cache_dir):
+        client, cancel = SafeClient(cache_dir), threading.Event()
+        try:
+            if args.source == "auto":
+                official.enrich(client,pending,cancel,update,print)
+            if args.source in ("auto","openalex"):
+                enrich_abstracts(client,[p for p in pending if p.get("doi") and eligible(p,"openalex")],cancel,update,print,os.getenv("OPENALEX_API_KEY", ""))
+                enrich_titles(client,[p for p in pending if eligible(p,"openalex_title")],cancel,update,print,os.getenv("OPENALEX_API_KEY", ""))
+            if args.source in ("auto","pages"):
+                for paper in pending:
+                    if not eligible(paper,"paper_page"): continue
+                    for url in official.page_candidates(paper):
+                        if urlsplit(url).hostname in blocked: continue
+                        try:
+                            result = client.get("paper_page",{"url":url},"paper:metadata",cancel,print)
+                            if title_key(result["title"]) != title_key(paper.get("title_text") or paper["title"]):
+                                raise PageError("官网标题与论文记录不一致。")
+                            if result.get("doi") and paper.get("doi") and doi_key(result["doi"]) != doi_key(paper["doi"]):
+                                raise PageError("官网 DOI 与论文记录不一致。")
+                            paper.update(abstract=result["abstract"],abstract_source="paper_website",abstract_url=result["url"],abstract_status="available")
+                            if paper.get("keyword_source", "").startswith("local_"):
+                                from paperclaw.core import keywords
+                                paper.update(keywords=keywords(paper["title"],paper["abstract"]),keyword_source="local_title_abstract")
+                        except AccessError as error:
+                            host = urlsplit(error.url or url).hostname
+                            blocked[host] = {"host":host,"url":error.url or url,"reason":str(error),"kind":error.kind}
+                            # A DOI resolver may lead to a blocked publisher.
+                            blocked[urlsplit(url).hostname] = blocked[host]
+                            report("running"); continue
+                        except PageError:
+                            continue
+                        else:
+                            paper["abstract_sources_checked"] = {**paper.get("abstract_sources_checked",{}),"paper_page":timestamp()}
+                            update([paper]); break
+                    else:
+                        # Access restrictions are not evidence of a missing abstract.
+                        if official.page_candidates(paper) and not any(urlsplit(u).hostname in blocked for u in official.page_candidates(paper)):
+                            paper["abstract_sources_checked"] = {**paper.get("abstract_sources_checked",{}),"paper_page":timestamp()}
+                            update([paper])
+        except CrawlError as error:
+            report("partial",str(error)); raise
+    report("completed")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command",required=True)
@@ -361,7 +454,13 @@ def main():
     analyzer.add_argument("--scope",choices=("featured","all"),default="featured",help="Featured classifications (excluding regular posters), or all papers with abstracts.")
     analyzer.add_argument("--dry-run",action="store_true",help="Show counts without contacting the AI service.")
     analyzer.add_argument("--force",action="store_true",help="Regenerate existing analyses within the limit.")
-    for item in (importer,builder,collector,batch,analyzer):
+    enricher = sub.add_parser("enrich",help="Fill missing source abstracts without invoking AI.")
+    enricher.add_argument("--conferences",default="")
+    enricher.add_argument("--years",default="2025,2026")
+    enricher.add_argument("--limit",type=int,default=500)
+    enricher.add_argument("--source",choices=("auto","openalex","pages"),default="auto")
+    enricher.add_argument("--force",action="store_true")
+    for item in (importer,builder,collector,batch,analyzer,enricher):
         item.add_argument("--data-dir",type=Path,default=ROOT / "site-data")
     args = parser.parse_args()
     if args.command == "import":
@@ -373,6 +472,8 @@ def main():
         collect_batch(args)
     elif args.command == "analyze":
         analyze(args)
+    elif args.command == "enrich":
+        enrich(args)
     else:
         if args.output.resolve() in (ROOT,ROOT/"web",ROOT/"site",args.data_dir.resolve()):
             raise ValueError("请将构建输出放在独立目录，例如 _site。")

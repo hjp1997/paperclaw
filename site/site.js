@@ -271,7 +271,7 @@ function paperCard(p) {
       el("p", "abstract-preview", p.abstract));
     if (p.abstract_url) detail.append(link("摘要来源 ↗", p.abstract_url));
     card.append(detail);
-  } else card.append(el("p", "help", "来源尚未提供摘要。"));
+  } else card.append(el("p", "help", "摘要待补全"));
   if (p.ai_analysis) {
     const analysis = el("details", "ai-analysis"), key = p._key + "|analysis";
     analysis.open = expanded.has(key);
