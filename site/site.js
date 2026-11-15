@@ -2,14 +2,17 @@
 const $ = id => document.getElementById(id);
 const {el, link, paperTitle} = window.PaperClawUI;
 const PAGE_SIZE = 25;
-const STORAGE_KEY = "paperclaw:collections:" + new URL(".", location.href).pathname;
+const STORAGE_SCOPE = new URL(".", location.href).pathname;
+const STORAGE_KEY = "paperclaw:papers:" + STORAGE_SCOPE;
+const LEGACY_STORAGE_KEY = "paperclaw:collections:" + STORAGE_SCOPE;
 const selected = new Set(), chosenConferences = new Set(), expanded = new Set();
 const cache = new Map(), paperIndex = new Map();
 const sources = {openalex:"OpenAlex", openreview:"OpenReview", conference_site:"会议官网", paper_website:"论文官网",
   arxiv:"arXiv", acl_anthology:"ACL Anthology", acl_program:"ACL 官网", ieee:"IEEE", usenix:"USENIX",
   crossref:"Crossref", dblp:"DBLP", dblp_rdf:"DBLP"};
 let manifest, papers = [], currentGroups = [], view = "all", page = 1, generation = 0, loading = false;
-let saved = readSaved();
+let bookmarkState = readSaved();
+let saved = bookmarkState.papers, legacyGroups = bookmarkState.legacyGroups;
 
 function notice(text) {
   $("notice").textContent = text;
@@ -18,29 +21,63 @@ function notice(text) {
 
 function readSaved() {
   try {
-    const value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-    return new Set(Array.isArray(value) ? value.filter(key => typeof key === "string") : []);
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw !== null) {
+      const value = JSON.parse(raw);
+      return {
+        papers:new Set(Array.isArray(value.papers) ? value.papers.filter(key => typeof key === "string" && key.includes("|")) : []),
+        legacyGroups:new Set(Array.isArray(value.legacy_groups) ? value.legacy_groups.filter(key => typeof key === "string") : [])
+      };
+    }
+    const old = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || "[]");
+    return {papers:new Set(), legacyGroups:new Set(Array.isArray(old) ? old.filter(key => typeof key === "string") : [])};
   } catch {
-    return new Set();
+    return {papers:new Set(), legacyGroups:new Set()};
   }
 }
 
-function toggleSaved(key) {
-  const next = new Set(saved);
-  if (next.has(key)) next.delete(key); else next.add(key);
+function saveBookmarks(next, remainingGroups = legacyGroups) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([...next]));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({version:1, papers:[...next], legacy_groups:[...remainingGroups]}));
     saved = next;
-    notice("");
-    if (view === "saved") loadPapers(); else renderGroups();
+    legacyGroups = remainingGroups;
     updateSavedCount();
+    return true;
   } catch {
     notice("浏览器未能保存收藏，请检查是否允许此网站保存本地数据。");
+    return false;
   }
+}
+
+async function restoreLegacyBookmarks() {
+  const groups = manifest.groups.filter(group => legacyGroups.has(group.key));
+  if (!groups.length) return true;
+  const results = await Promise.allSettled(groups.map(collection));
+  const next = new Set(saved), pending = new Set(legacyGroups);
+  results.forEach((result,index) => {
+    if (result.status !== "fulfilled") return;
+    for (const paper of result.value) next.add(paper._key);
+    pending.delete(groups[index].key);
+  });
+  return saveBookmarks(next,pending) && results.every(result => result.status === "fulfilled");
+}
+
+function saveSelectedPapers() {
+  const next = new Set(saved);
+  for (const key of selected) next.add(key);
+  if (saveBookmarks(next)) { notice("已收藏所选论文。"); render(); }
+}
+
+function removeSelectedPapers() {
+  const next = new Set(saved);
+  for (const key of selected) next.delete(key);
+  if (!saveBookmarks(next)) return;
+  for (const key of [...selected]) if (!next.has(key)) selected.delete(key);
+  if (view === "saved") loadPapers(); else render();
 }
 
 function updateSavedCount() {
-  $("savedView").textContent = "我的收藏（" + saved.size + " 组）";
+  $("savedView").textContent = "我的收藏（" + saved.size + " 篇）";
 }
 
 async function jsonFile(path) {
@@ -53,8 +90,9 @@ async function jsonFile(path) {
 
 function groupsInScope() {
   const year = $("filterYear").value;
+  const savedGroups = new Set([...saved].map(key => key.split("|")[0]));
   return manifest.groups.filter(group => (!year || String(group.year) === year) &&
-    (view === "saved" ? saved.has(group.key) : chosenConferences.has(group.conference)));
+    (view === "saved" ? savedGroups.has(group.key) : chosenConferences.has(group.conference)));
 }
 
 async function collection(group) {
@@ -79,7 +117,8 @@ async function loadPapers() {
   try {
     const results = await Promise.all(currentGroups.map(collection));
     if (version !== generation) return;
-    papers = results.flat();
+    papers = results.flat().filter(p => view !== "saved" || saved.has(p._key));
+    renderGroups();
     const category = $("filterCategory").value;
     const labels = [...new Set(papers.flatMap(p => p.categories || []))].sort();
     $("filterCategory").replaceChildren(new Option("全部分类", ""), new Option("暂无分类标签", "__none__"),
@@ -103,10 +142,11 @@ function renderGroups() {
     const row = el("div", "collection-row");
     row.append(el("span", "collection-name", group.conference + " " + group.year),
       el("span", "collection-count", group.count + " 篇 · " + group.abstract_count + " 篇有摘要"));
-    const keep = el("button", "", saved.has(group.key) ? "取消收藏" : "收藏本组");
-    keep.setAttribute("aria-pressed", String(saved.has(group.key)));
-    keep.onclick = () => toggleSaved(group.key);
-    row.append(keep);
+    if (view === "saved") {
+      const count = papers.filter(p => p._key.startsWith(group.key + "|")).length;
+      row.replaceChildren(el("span", "collection-name", group.conference + " " + group.year),
+        el("span", "collection-count", count + " 篇收藏"));
+    }
     return row;
   }));
 }
@@ -123,6 +163,7 @@ function paperCard(p) {
   };
   choose.append(input, "选择");
   top.append(choose, el("span", "tag", p.conference), el("span", "", p.year), el("span", "tag source", sources[p.source] || p.source));
+  if (saved.has(p._key)) top.append(el("span","saved-mark","已收藏"));
   for (const category of p.categories || []) {
     const tag = link(category, p.category_sources?.[category]);
     tag.className = "distinction";
@@ -154,6 +195,11 @@ function paperCard(p) {
 function renderSelection(rows) {
   $("selectionInfo").textContent = selected.size ? "已勾选 " + selected.size + " 篇，导出所选论文" : "导出筛选的 " + rows.length + " 篇";
   $("clearSelection").disabled = !selected.size;
+  const allSaved = selected.size > 0 && [...selected].every(key => saved.has(key));
+  $("saveSelected").disabled = !selected.size || allSaved;
+  $("saveSelected").textContent = allSaved ? "所选论文已收藏" : "收藏已勾选的论文";
+  $("removeSelected").hidden = view !== "saved";
+  $("removeSelected").disabled = ![...selected].some(key => saved.has(key));
   $("selectFiltered").disabled = loading || !rows.length || rows.every(p => selected.has(p._key));
   document.querySelectorAll("[data-export]").forEach(button => button.disabled = !selected.size && !rows.length);
 }
@@ -172,7 +218,7 @@ function render() {
   if (!cards.length) {
     let empty = "没有匹配的论文，请调整会议或筛选条件。";
     if (loading) empty = "正在读取论文数据…";
-    else if (view === "saved" && !currentGroups.length) empty = saved.size ? "当前发布数据中暂未收录这些收藏。" : "还没有收藏。";
+    else if (view === "saved" && !rows.length) empty = saved.size || legacyGroups.size ? "当前筛选或发布数据中暂未收录这些收藏。" : "还没有收藏论文。";
     cards.push(el("div", "empty", empty));
   }
   $("papers").replaceChildren(...cards);
@@ -271,13 +317,18 @@ $("filterYear").onchange = () => loadPapers();
 for (const id of ["search", "filterCategory"]) $(id).addEventListener("input", () => { page = 1; render(); });
 $("selectFiltered").onclick = () => { for (const paper of filtered()) selected.add(paper._key); render(); };
 $("clearSelection").onclick = () => { selected.clear(); render(); };
+$("saveSelected").onclick = saveSelectedPapers;
+$("removeSelected").onclick = removeSelectedPapers;
 $("prev").onclick = () => { page--; render(); };
 $("next").onclick = () => { page++; render(); };
 document.querySelectorAll("[data-export]").forEach(button => button.onclick = () => exportFile(button.dataset.export));
-window.addEventListener("storage", event => {
-  if (event.key !== STORAGE_KEY) return;
-  saved = readSaved(); updateSavedCount();
-  if (view === "saved") loadPapers(); else renderGroups();
+window.addEventListener("storage", async event => {
+  if (event.key !== STORAGE_KEY && event.key !== LEGACY_STORAGE_KEY && event.key !== null) return;
+  bookmarkState = readSaved(); saved = bookmarkState.papers; legacyGroups = bookmarkState.legacyGroups;
+  const restored = await restoreLegacyBookmarks();
+  updateSavedCount();
+  if (view === "saved") await loadPapers(); else render();
+  if (!restored) notice("旧收藏暂未恢复完成，请稍后刷新重试。");
 });
 
 (async () => {
@@ -287,10 +338,12 @@ window.addEventListener("storage", event => {
     const initialGroup = manifest.groups.find(group => group.abstract_count > 0) || manifest.groups[0];
     chosenConferences.add(initialGroup.conference);
     conferenceTree(); updateSavedCount();
+    const restored = await restoreLegacyBookmarks();
     $("filterYear").replaceChildren(new Option("全部年份", ""),
       ...[...new Set(manifest.groups.map(g => g.year))].sort((a, b) => b - a).map(year => new Option(year, year)));
     $("updated").textContent = "数据更新于 " + new Date(manifest.updated_at).toLocaleString("zh-CN");
     await loadPapers();
+    if (!restored) notice("旧收藏暂未恢复完成，请稍后刷新重试。");
   } catch (error) {
     $("loading").textContent = ""; notice(error.message);
   }

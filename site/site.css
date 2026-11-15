@@ -3,8 +3,7 @@
 .collection-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; padding:8px 0; border-bottom:1px solid var(--line); font-size:12px; }
 .collection-name { font-weight:600; }
 .collection-count { color:var(--muted); }
-.collection-row button { margin-left:auto; min-height:28px; padding:3px 9px; font-size:12px; }
-.collection-row button[aria-pressed=true] { color:var(--green); background:#eaf3eb; }
+.saved-mark { color:var(--green); background:#eaf3eb; border-radius:4px; padding:2px 6px; }
 #loading { font-size:12px; color:var(--muted); }
 #updated { margin-bottom:0; }
 .venue-leaf .venue-count { margin-left:auto; color:var(--muted); font-size:11px; }
