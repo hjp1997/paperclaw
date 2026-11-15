@@ -200,8 +200,11 @@ class SafeClient:
                 for _ in range(3):
                     if status not in (301,302,303,307,308): break
                     target = urllib.parse.urljoin(url, header(headers,"Location"))
+                    if target.startswith("http://") and official.allowed_page("https://"+target[7:]):
+                        target = "https://"+target[7:]
                     if not official.allowed_page(target):
-                        raise AccessError("论文页面跳转到登录或未支持的网站，请在浏览器中打开原文链接核对。",source,"login",url)
+                        kind = "login" if re.search(r"(?:/authorize|/log-?in|/sign-?in|\bidp\.)",target,re.I) else "redirect"
+                        raise AccessError("论文页面跳转到登录或未支持的网站，请在浏览器中打开原文链接核对。",source,kind,url)
                     self.reserve_request(cancel,progress)
                     url = target
                     status,headers,raw = self.transport(url)

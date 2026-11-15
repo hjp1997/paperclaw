@@ -366,6 +366,9 @@ def enrich(args):
     if not collections: raise ValueError("尚无所选会议年份的数据，请先采集。")
     report_path = args.data_dir/"status"/"abstracts.json"
     blocked = {}
+    def page_key(url):
+        parsed = urlsplit(url)
+        return parsed.hostname + ("/"+parsed.path.strip("/").split("/",1)[0].lower() if parsed.hostname == "doi.org" else "")
     initial = sum(bool(p["abstract"]) for _,p in index.values())
     def report(status, message=""):
         rows = [p for _,items in collections.values() for p in items]
@@ -398,7 +401,7 @@ def enrich(args):
                 for paper in pending:
                     if not eligible(paper,"paper_page"): continue
                     for url in official.page_candidates(paper):
-                        if urlsplit(url).hostname in blocked: continue
+                        if page_key(url) in blocked: continue
                         try:
                             result = client.get("paper_page",{"url":url},"paper:metadata",cancel,print)
                             if title_key(result["title"]) != title_key(paper.get("title_text") or paper["title"]):
@@ -413,16 +416,18 @@ def enrich(args):
                             host = urlsplit(error.url or url).hostname
                             blocked[host] = {"host":host,"url":error.url or url,"reason":str(error),"kind":error.kind}
                             # A DOI resolver may lead to a blocked publisher.
-                            blocked[urlsplit(url).hostname] = blocked[host]
+                            blocked[page_key(url)] = blocked[host]
                             report("running"); continue
                         except PageError:
                             continue
                         else:
                             paper["abstract_sources_checked"] = {**paper.get("abstract_sources_checked",{}),"paper_page":timestamp()}
-                            update([paper]); break
+                            update([paper])
+                            print(f"官网摘要已补全：{paper['conference']} {paper['year']} · {paper['title'][:100]}",flush=True)
+                            break
                     else:
                         # Access restrictions are not evidence of a missing abstract.
-                        if official.page_candidates(paper) and not any(urlsplit(u).hostname in blocked for u in official.page_candidates(paper)):
+                        if official.page_candidates(paper) and not any(page_key(u) in blocked for u in official.page_candidates(paper)):
                             paper["abstract_sources_checked"] = {**paper.get("abstract_sources_checked",{}),"paper_page":timestamp()}
                             update([paper])
         except CrawlError as error:

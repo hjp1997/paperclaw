@@ -1,7 +1,7 @@
 """Conference catalogs and verifiable paper landing pages."""
 import re
 import json
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit, urlunsplit, parse_qs, urlencode
 from xml.etree import ElementTree
 
 from .catalog import Document, plain
@@ -30,7 +30,7 @@ def parse_page(raw, url):
             metadata[name] = tag.attrs["content"]
     headings = root.find(cls="presentation-title") or root.find("h1")
     title = metadata.get("citation_title") or metadata.get("dc.title") or (plain(headings[0]) if headings else "") or metadata.get("og:title")
-    abstracts = root.find(cls="abstract") or root.find(cls="abstractSection") or root.find(cls="c-article-section__content")
+    abstracts = root.find(cls="abstract") or root.find(cls="abstractSection") or root.find(cls="field-name-field-paper-description-long")
     # Springer has several section bodies; only the Abstract section is relevant.
     if urlsplit(url).hostname in ("link.springer.com","link.springernature.com"):
         sections = [n for n in root.find("section") if n.attrs.get("data-title", "").casefold() == "abstract" or n.attrs.get("id") == "Abs1"]
@@ -54,8 +54,10 @@ def parse_page(raw, url):
                 except ValueError: pass
         for data in payloads:
             if not isinstance(data,dict): continue
-            if script.attrs.get("type") == "application/ld+json" and not set([data.get("@type")] if isinstance(data.get("@type"),str) else data.get("@type",[])) & {"ScholarlyArticle","Article"}: continue
-            if data.get("abstract"):
+            kind = data.get("@type", [])
+            kinds = [kind] if isinstance(kind,str) else kind if isinstance(kind,list) else []
+            if script.attrs.get("type") == "application/ld+json" and not any(k in ("ScholarlyArticle","Article") for k in kinds): continue
+            if isinstance(data.get("abstract"),str) and data["abstract"].strip():
                 # A complete structured abstract beats short description metadata.
                 abstract = plain(Document(str(data["abstract"])).root)
                 title = data.get("headline") or data.get("title") or data.get("name") or title
@@ -81,7 +83,9 @@ def page_candidates(paper):
         if not candidate: continue
         parsed = urlsplit(candidate)
         if parsed.hostname == "sc26.conference-program.com" and parsed.path == "/":
-            candidate = urlunsplit(("https",parsed.netloc,"/presentation/",parsed.query,""))
+            values = parse_qs(parsed.query)
+            query = urlencode({key:values[key][0] for key in ("id","sess") if key in values})
+            candidate = urlunsplit(("https",parsed.netloc,"/presentation/",query,""))
         if allowed_page(candidate) and not urlsplit(candidate).path.lower().endswith(".pdf") and candidate not in result:
             result.append(candidate)
     return result

@@ -19,7 +19,7 @@ on:
       limit:
         description: "本轮最多处理缺失摘要论文数；0 表示全部"
         type: string
-        default: "500"
+        default: "0"
 
 permissions:
   contents: write

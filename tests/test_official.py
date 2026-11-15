@@ -26,7 +26,7 @@ class OfficialTests(unittest.TestCase):
         calls=[]
         def transport(url):
             calls.append(url)
-            if "doi.org" in url: return 302,{"Location":"https://ieeexplore.ieee.org/document/1"},b""
+            if "doi.org" in url: return 302,{"Location":"http://ieeexplore.ieee.org/document/1"},b""
             return 200,{},b'<h1>Actual paper</h1><div class="abstract">Full abstract.</div>'
         with tempfile.TemporaryDirectory() as directory:
             client=SafeClient(directory,transport=transport,interval=0)

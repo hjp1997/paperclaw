@@ -384,7 +384,7 @@ function exportRows(rows, format) {
       "- 关键词 · " + escape(p.keywords.join("; ")),
       "- 论文 · " + escape(p.url),
       "- 摘要来源 · " + escape(p.abstract_source) + " " + escape(p.abstract_url),
-      labels, "", escape(p.abstract) || "来源尚未提供摘要。", "",
+      labels, "", escape(p.abstract) || "摘要待补全", "",
       ...(p.ai_analysis ? ["### AI 总结 · 摘要级", "",
         "- Topic · " + p.ai_analysis.topics.map(id => escape(manifest.topics?.[id] || id)).join("; "),
         "- 研究关键词 · " + (p.ai_analysis.keyphrases || []).map(escape).join("; "),

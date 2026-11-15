@@ -3,17 +3,29 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from paperclaw.abstracts import enrich_abstracts, enrich_titles, reconstruct
+from paperclaw.abstracts import enrich_abstracts, enrich_titles, reconstruct, paper_abstract
 from paperclaw.catalog import Document, plain, parse_catalog, parse_usenix
 from paperclaw.core import CrawlError, SafeClient, crawl_group, normalize
 from paperclaw.server import Application, validate_options
 
 
 class EnrichmentTests(unittest.TestCase):
+    ABSTRACT = "We study a verifiable systems problem and describe a concrete method with measurements and results from the paper."
+
+    def test_source_quality_rejects_artifact_repository_and_tiny_fragments(self):
+        index={}
+        for i,w in enumerate(self.ABSTRACT.split()):index.setdefault(w,[]).append(i)
+        self.assertEqual(paper_abstract({"abstract_inverted_index":index}),self.ABSTRACT)
+        for extra in ({"doi":"https://doi.org/10.5281/zenodo.1"},{"type":"dataset"},
+                      {"primary_location":{"landing_page_url":"https://figshare.com/articles/x"}}):
+            self.assertEqual(paper_abstract({"abstract_inverted_index":index,**extra}),"")
+        self.assertEqual(paper_abstract({"abstract_inverted_index":{"Artifact.":[0]}}),"")
+
     def test_title_search_requires_full_title_author_year_and_unique_record(self):
         paper = {"id":"original-id","title":"Unique Systems Paper","authors":["Alice Example 0001"],"year":2026,"abstract":"","doi":""}
         good = {"id":"https://openalex.org/W1","doi":"https://doi.org/10.1145/123","title":paper["title"],"publication_year":2026,
-                "authorships":[{"author":{"display_name":"Alice Example"}}],"abstract_inverted_index":{"Full":[0],"abstract.":[1]}}
+                "authorships":[{"author":{"display_name":"Alice Example"}}],"abstract_inverted_index":{}}
+        for i,w in enumerate(self.ABSTRACT.split()):good["abstract_inverted_index"].setdefault(w,[]).append(i)
         class Client:
             rows = []
             def get(self,*args): return {"meta":{"count":len(self.rows)},"results":self.rows}
@@ -31,6 +43,8 @@ class EnrichmentTests(unittest.TestCase):
             self.assertEqual(reconstruct(index), "")
 
     def test_exact_doi_missing_and_existing_abstract(self):
+        index={}
+        for i,w in enumerate(self.ABSTRACT.split()):index.setdefault(w,[]).append(i)
         papers = [{"id": "1", "doi": "10.1/ABC", "title": "Routing", "abstract": "", "keyword_source": "local_title"},
                   {"id": "2", "doi": "10.1/missing", "title": "Routing", "abstract": ""},
                   {"id": "3", "doi": "10.1/has", "title": "Existing", "abstract": "Original"}]
@@ -39,11 +53,11 @@ class EnrichmentTests(unittest.TestCase):
                 assert source == "openalex"
                 assert "10.1/has" not in params["filter"]
                 return {"meta": {"count": 2}, "results": [
-                    {"id": "https://openalex.org/W1", "doi": "https://doi.org/10.1/abc", "abstract_inverted_index": {"Real": [0], "abstract.": [1]}},
+                    {"id": "https://openalex.org/W1", "doi": "https://doi.org/10.1/abc", "abstract_inverted_index": index},
                     {"id": "https://openalex.org/W2", "doi": "https://doi.org/10.1/unrelated", "title": "Routing", "abstract_inverted_index": {"Wrong": [0]}}]}
         rows = []
         enrich_abstracts(Client(), papers, threading.Event(), rows.extend, lambda m: None)
-        self.assertEqual(rows[0]["abstract"], "Real abstract.")
+        self.assertEqual(rows[0]["abstract"], self.ABSTRACT)
         self.assertEqual(rows[0]["abstract_source"], "openalex")
         self.assertEqual(rows[1]["abstract_status"], "unavailable")
         self.assertEqual(len(rows), 2)
