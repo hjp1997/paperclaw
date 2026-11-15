@@ -11,7 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from paperclaw.catalog import CATALOG
-from paperclaw.core import EXPORT_FIELDS, atomic_json, read_json, safe_url
+from paperclaw.core import EXPORT_FIELDS, CrawlError, atomic_json, read_json, safe_url
+from paperclaw.analysis import MODEL, TOPICS, analyze_paper, public_analysis
 from paperclaw.instance import InstanceLock
 from paperclaw.server import Application
 from paperclaw.titles import prepare_title
@@ -55,6 +56,9 @@ def public_paper(paper):
     result.setdefault("track", "main")
     result["abstract_status"] = "available" if result["abstract"] else result.get("abstract_status", "not_checked")
     prepare_title(result)
+    analysis = public_analysis(paper)
+    if analysis:
+        result["ai_analysis"] = analysis
     return result
 
 
@@ -76,6 +80,11 @@ def retain_metadata(paper, old):
             paper[field] = old.get(field, paper.get(field))
     paper["category_sources"] = {**old.get("category_sources", {}), **paper.get("category_sources", {})}
     paper["categories"] = sorted(set(old.get("categories", [])) | set(paper.get("categories", [])))
+    analysis = public_analysis(paper) or public_analysis({**paper, "ai_analysis": old.get("ai_analysis")})
+    if analysis:
+        paper["ai_analysis"] = analysis
+    else:
+        paper.pop("ai_analysis", None)
     return paper
 
 
@@ -114,6 +123,7 @@ def build(data_dir, output):
         metadata = read_json(path,{})
         groups.append({"key":key, "conference":conference, "year":year, "file":filename,
                        "count":len(rows), "abstract_count":sum(bool(p["abstract"]) for p in rows),
+                       "analysis_count":sum(bool(p.get("ai_analysis")) for p in rows),
                        "updated_at":metadata.get("updated_at","") if isinstance(metadata,dict) else ""})
     if not groups:
         raise ValueError("site-data 中还没有论文数据，请先运行 import 或 collect。")
@@ -127,7 +137,9 @@ def build(data_dir, output):
         "schema_version":1, "updated_at":timestamp(),
         "groups":sorted(groups,key=lambda g:(-g["year"],g["conference"])),
         "catalog":[dict(v) for v in CATALOG.values()],
-        "export_fields":[field for field in EXPORT_FIELDS if field != "ai_summary"],
+        "topics":TOPICS,
+        "export_fields":[field for field in EXPORT_FIELDS if field != "ai_summary"] +
+                        ["topics", "ai_problem", "ai_method", "ai_results", "ai_model"],
     })
     print(f"Built {len(groups)} collections in {output.resolve()}",flush=True)
 
@@ -162,6 +174,54 @@ def collect(args):
         save_collections(result["papers"],args.data_dir,replace=True)
 
 
+def analyze(args):
+    conferences = {c.strip() for c in args.conferences.split(",") if c.strip()}
+    years = {int(y.strip()) for y in args.years.split(",") if y.strip()}
+    if not conferences or conferences - CATALOG.keys() or not years or any(not 1980 <= y <= 2100 for y in years):
+        raise ValueError("请选择有效的会议和年份。")
+    if not 1 <= args.limit <= 1000:
+        raise ValueError("每轮分析篇数必须在 1–1000 之间。")
+    batches, total, ready, missing = [], 0, 0, 0
+    for path in sorted(args.data_dir.glob("*.json")):
+        rows = load_input(path)
+        pending = []
+        for paper in rows:
+            if paper["conference"] not in conferences or paper["year"] not in years:
+                continue
+            total += 1
+            if not paper["abstract"].strip():
+                missing += 1
+            elif not args.force and paper.get("ai_analysis", {}).get("model") == args.model:
+                ready += 1
+            else:
+                pending.append(paper)
+        if pending:
+            batches.append((path, rows, pending))
+    if not total:
+        raise ValueError("指定会议和年份尚无已采集数据，请先采集或导入。")
+    pending_count = sum(len(items) for _, _, items in batches)
+    print(f"范围 {total} 篇；已完成 {ready}；缺摘要 {missing}；待分析 {pending_count}；本轮上限 {args.limit}。", flush=True)
+    if args.dry_run or not pending_count:
+        return
+    key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+    if not key:
+        raise ValueError("请在 GitHub Secrets 或本地环境变量中配置 DEEPSEEK_API_KEY。")
+    done = 0
+    for path, rows, pending in batches:
+        metadata = read_json(path, {})
+        for paper in pending:
+            if done >= args.limit:
+                break
+            paper["ai_analysis"] = analyze_paper(paper, key, args.model)
+            atomic_json(path, {"schema_version":1, "conference":rows[0]["conference"], "year":rows[0]["year"],
+                               "updated_at":metadata.get("updated_at", ""), "analysis_updated_at":timestamp(), "papers":rows})
+            done += 1
+            print(f"已生成 {done}/{min(args.limit,pending_count)} · {paper['conference']} {paper['year']}", flush=True)
+        if done >= args.limit:
+            break
+    print(f"本轮生成 {done} 篇；剩余 {pending_count-done} 篇可再次运行继续。", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command",required=True)
@@ -174,7 +234,14 @@ def main():
     collector.add_argument("--years",required=True,help="Comma-separated years.")
     collector.add_argument("--source",choices=["auto","conference","crossref","dblp","openreview","ieee","usenix"],default="conference")
     collector.add_argument("--skip-abstracts",action="store_true")
-    for item in (importer,builder,collector):
+    analyzer = sub.add_parser("analyze",help="Precompute public topics and abstract summaries using DeepSeek.")
+    analyzer.add_argument("--conferences",required=True)
+    analyzer.add_argument("--years",required=True)
+    analyzer.add_argument("--model",default=MODEL)
+    analyzer.add_argument("--limit",type=int,default=50)
+    analyzer.add_argument("--dry-run",action="store_true",help="Show counts without contacting the AI service.")
+    analyzer.add_argument("--force",action="store_true",help="Regenerate existing analyses within the limit.")
+    for item in (importer,builder,collector,analyzer):
         item.add_argument("--data-dir",type=Path,default=ROOT / "site-data")
     args = parser.parse_args()
     if args.command == "import":
@@ -182,6 +249,8 @@ def main():
         save_collections(papers,args.data_dir)
     elif args.command == "collect":
         collect(args)
+    elif args.command == "analyze":
+        analyze(args)
     else:
         if args.output.resolve() in (ROOT,ROOT/"web",ROOT/"site",args.data_dir.resolve()):
             raise ValueError("请将构建输出放在独立目录，例如 _site。")
@@ -191,5 +260,5 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError,KeyError,TypeError,OSError) as error:
+    except (ValueError,KeyError,TypeError,OSError,CrawlError) as error:
         raise SystemExit(str(error)) from None

@@ -124,6 +124,11 @@ async function loadPapers() {
     $("filterCategory").replaceChildren(new Option("全部分类", ""), new Option("暂无分类标签", "__none__"),
       ...labels.map(label => new Option(label, label)));
     if ([...$("filterCategory").options].some(option => option.value === category)) $("filterCategory").value = category;
+    const topic = $("filterTopic").value;
+    const topics = [...new Set(papers.flatMap(p => p.ai_analysis?.topics || []))].sort();
+    $("filterTopic").replaceChildren(new Option("全部 Topic", ""), new Option("尚未分析", "__none__"),
+      ...topics.map(id => new Option(manifest.topics?.[id] || id, id)));
+    if ([...$("filterTopic").options].some(option => option.value === topic)) $("filterTopic").value = topic;
   } catch (error) {
     if (version === generation) notice(error.message);
   } finally {
@@ -132,16 +137,20 @@ async function loadPapers() {
 }
 
 function filtered() {
-  const text = $("search").value.trim().toLowerCase(), category = $("filterCategory").value;
+  const text = $("search").value.trim().toLowerCase(), category = $("filterCategory").value, topic = $("filterTopic").value;
   return papers.filter(p => (!category || (category === "__none__" ? !p.categories?.length : p.categories?.includes(category))) &&
-    (!text || [p.title, p.title_text, p.abstract, p.doi, ...p.authors, ...p.keywords].join(" ").toLowerCase().includes(text)));
+    (!topic || (topic === "__none__" ? !p.ai_analysis : p.ai_analysis?.topics.includes(topic))) &&
+    (!text || [p.title, p.title_text, p.abstract, p.doi, ...p.authors, ...p.keywords,
+      ...(p.ai_analysis?.topics || []).map(id => manifest.topics?.[id] || id),
+      ...["problem", "method", "results"].map(field => p.ai_analysis?.[field] || "")].join(" ").toLowerCase().includes(text)));
 }
 
 function renderGroups() {
   $("groups").replaceChildren(...currentGroups.map(group => {
     const row = el("div", "collection-row");
     row.append(el("span", "collection-name", group.conference + " " + group.year),
-      el("span", "collection-count", group.count + " 篇 · " + group.abstract_count + " 篇有摘要"));
+      el("span", "collection-count", group.count + " 篇 · " + group.abstract_count + " 篇有摘要" +
+        (group.analysis_count ? " · " + group.analysis_count + " 篇已分析" : "")));
     if (view === "saved") {
       const count = papers.filter(p => p._key.startsWith(group.key + "|")).length;
       row.replaceChildren(el("span", "collection-name", group.conference + " " + group.year),
@@ -173,6 +182,18 @@ function paperCard(p) {
   const keywords = el("div", "keywords");
   for (const word of p.keywords) keywords.append(el("span", "keyword", word));
   card.append(keywords);
+  if (p.ai_analysis) {
+    const topics = el("div", "ai-topics");
+    topics.setAttribute("aria-label", "AI Topic");
+    for (const id of p.ai_analysis.topics) {
+      const chip = el("button", "ai-topic", manifest.topics?.[id] || id);
+      chip.type = "button";
+      chip.title = "按此 AI Topic 筛选";
+      chip.onclick = () => { $("filterTopic").value = id; page = 1; render(); };
+      topics.append(chip);
+    }
+    card.append(topics);
+  }
   const bottom = el("div", "paper-bottom");
   if (p.publisher_url || p.url) bottom.append(link("论文页面 ↗", p.publisher_url || p.url));
   if (p.pdf_url) bottom.append(link("PDF ↗", p.pdf_url));
@@ -189,6 +210,21 @@ function paperCard(p) {
     if (p.abstract_url) detail.append(link("摘要来源 ↗", p.abstract_url));
     card.append(detail);
   } else card.append(el("p", "help", "来源尚未提供摘要。"));
+  if (p.ai_analysis) {
+    const analysis = el("details", "ai-analysis"), key = p._key + "|analysis";
+    analysis.open = expanded.has(key);
+    analysis.addEventListener("toggle", () => {
+      if (analysis.open) expanded.add(key); else expanded.delete(key);
+    });
+    analysis.append(el("summary", "", "AI 总结 · 摘要级"));
+    const content = el("dl");
+    for (const [field, label] of [["problem", "研究问题"], ["method", "方法"], ["results", "结果"]]) {
+      content.append(el("dt", "", label), el("dd", "", p.ai_analysis[field]));
+    }
+    analysis.append(content, el("p", "help", p.ai_analysis.provider + " · " + p.ai_analysis.model + " · " +
+      new Date(p.ai_analysis.generated_at).toLocaleDateString("zh-CN")));
+    card.append(analysis);
+  }
   return card;
 }
 
@@ -249,7 +285,7 @@ function conferenceTree() {
 }
 
 function setView(next) {
-  view = next; selected.clear(); $("search").value = ""; $("filterYear").value = ""; $("filterCategory").value = "";
+  view = next; selected.clear(); $("search").value = ""; $("filterYear").value = ""; $("filterCategory").value = ""; $("filterTopic").value = "";
   $("allView").setAttribute("aria-pressed", String(view === "all"));
   $("savedView").setAttribute("aria-pressed", String(view === "saved"));
   loadPapers();
@@ -267,7 +303,10 @@ function exportRows(rows, format) {
       return '"' + value.replaceAll('"', '""') + '"';
     };
     const fields = manifest.export_fields;
-    return "\uFEFF" + [fields.map(cell).join(","), ...clean.map(row => fields.map(field => cell(row[field])).join(","))].join("\r\n") + "\r\n";
+    const csvRow = row => ({...row, topics:(row.ai_analysis?.topics || []).map(id => manifest.topics?.[id] || id),
+      ai_problem:row.ai_analysis?.problem, ai_method:row.ai_analysis?.method,
+      ai_results:row.ai_analysis?.results, ai_model:row.ai_analysis?.model});
+    return "\uFEFF" + [fields.map(cell).join(","), ...clean.map(csvRow).map(row => fields.map(field => cell(row[field])).join(","))].join("\r\n") + "\r\n";
   }
   const escape = value => String(value ?? "").replace(/[\\\x60*_[\]<>#|]/g, "\\$&");
   const sections = clean.map(p => {
@@ -280,7 +319,12 @@ function exportRows(rows, format) {
       "- 关键词 · " + escape(p.keywords.join("; ")),
       "- 论文 · " + escape(p.url),
       "- 摘要来源 · " + escape(p.abstract_source) + " " + escape(p.abstract_url),
-      labels, "", escape(p.abstract) || "来源尚未提供摘要。", ""
+      labels, "", escape(p.abstract) || "来源尚未提供摘要。", "",
+      ...(p.ai_analysis ? ["### AI 总结 · 摘要级", "",
+        "- Topic · " + p.ai_analysis.topics.map(id => escape(manifest.topics?.[id] || id)).join("; "),
+        "- 研究问题 · " + escape(p.ai_analysis.problem), "- 方法 · " + escape(p.ai_analysis.method),
+        "- 结果 · " + escape(p.ai_analysis.results),
+        "- 模型 · " + escape(p.ai_analysis.provider + " / " + p.ai_analysis.model), ""] : [])
     ].join("\n");
   });
   return "# 会议论文\n\n共 " + clean.length + " 篇。\n\n" + sections.join("\n");
@@ -314,7 +358,7 @@ async function exportFile(format) {
 $("allView").onclick = () => setView("all");
 $("savedView").onclick = () => setView("saved");
 $("filterYear").onchange = () => loadPapers();
-for (const id of ["search", "filterCategory"]) $(id).addEventListener("input", () => { page = 1; render(); });
+for (const id of ["search", "filterCategory", "filterTopic"]) $(id).addEventListener("input", () => { page = 1; render(); });
 $("selectFiltered").onclick = () => { for (const paper of filtered()) selected.add(paper._key); render(); };
 $("clearSelection").onclick = () => { selected.clear(); render(); };
 $("saveSelected").onclick = saveSelectedPapers;

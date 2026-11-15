@@ -40,7 +40,7 @@ git push
 
 同一会议和年份默认合并去重。新增记录缺少摘要时会保留已有摘要。可同时导入多个 JSON 文件。
 
-`import` 也支持本地工具的 `data/results.json`。此时只导入最近清单中的论文，公开字段采用固定清单。个人收藏、AI 分析、API Key 和其他额外字段会被排除。
+`import` 也支持本地工具的 `data/results.json`。此时只导入最近清单中的论文，公开字段采用固定清单。个人收藏、本地私有 `ai_summary`、API Key 和其他额外字段会被排除。通过下述预生成流程产生的公开 `ai_analysis` 会保留。
 
 ### 在 GitHub 中手动采集
 
@@ -61,6 +61,7 @@ git push
 |---|---|
 | `OPENALEX_API_KEY` | 批量补全 DOI 对应摘要 |
 | `IEEE_API_KEY` | 使用 `ieee` 来源 |
+| `DEEPSEEK_API_KEY` | 预生成 AI Topic 与中文摘要总结 |
 
 密钥通过采集步骤的环境变量使用。发布产物仅包含静态页面和白名单论文字段。
 
@@ -70,6 +71,46 @@ git push
 python pages.py collect --conferences ICLR --years 2025 --source conference
 python pages.py build
 ```
+
+## 预生成 Topic 和摘要级总结
+
+已接入 DeepSeek 官方 Chat Completions 接口，默认模型为 `deepseek-flash`，关闭思考并要求 JSON 输出。每篇只发送标题和摘要，生成 1–5 个 Topic 及中文研究问题、方法、结果三项总结。摘要没有报告具体结果时会要求模型明确写出这一点。总结按摘要级内容标记，不等同于全文评阅。
+
+网站支持 Topic 筛选、点击 Topic 标签筛选、搜索总结内容，以及随 CSV / Markdown / JSON 导出。AI Topic 独立于 Oral、Highlight、Best Paper 等会议官方分类。
+
+首次启用：
+
+1. 在仓库 [Settings → Secrets and variables → Actions](https://github.com/hjp1997/paperclaw/settings/secrets/actions) 添加 Repository secret `DEEPSEEK_API_KEY`，值填 DeepSeek Key。不要把密钥放入代码、论文字段或 workflow 输入。
+2. 打开 [Actions → Publish PaperClaw](https://github.com/hjp1997/paperclaw/actions/workflows/pages.yml)，点击 **Run workflow**。
+3. 若已有论文数据，保持“发布前重新采集指定会议”关闭。填会议、年份，例如 `ICLR` / `2025`。
+4. 勾选“生成 AI Topic 和中文摘要总结”，首次将本轮篇数设为 `5`，核对质量后可改为 `50` 或其他 1–1000 的值。
+5. 运行结束后，结果自动保存到 `site-data`、提交并发布。普通推送和不勾选 AI 的发布均不会调用模型；访客阅读预生成结果不需要 API Key。
+
+没有摘要的论文自动跳过；标题、摘要、词表版本和模型未变化的已完成记录也会跳过。再次运行可接着处理剩余论文。每完成一篇就保存检查点；接口错误或格式错误会立即停止，不自动重试，也不添加重试暂停。工作流在失败时仍提交已完成的检查点，失败轮次不会替换线上版本。下一轮成功后继续发布。
+
+重新采集时，匹配同一 ID 且标题、摘要未变化的分析会保留；输入变化后旧总结会失效，下一次 AI 运行重新生成。若需在输入不变时重新生成，可在本地使用 `--force`；更换模型可使用 `--model`。
+
+本地运行（事先在环境变量中设置 `DEEPSEEK_API_KEY`）：
+
+```powershell
+# 仅查看数量，不访问 AI、不产生费用
+python pages.py analyze --conferences ICLR --years 2025 --dry-run
+# 实际调用，最多生成 5 篇
+python pages.py analyze --conferences ICLR --years 2025 --limit 5
+python pages.py build
+```
+
+Topic 词表位于 `paperclaw/analysis.py` 的 `TOPICS`，覆盖网络、系统、AI、数据库、理论和交叉应用。修改标签含义或提示词规则时应同时递增 `VERSION`，使旧结果失效。提示词与结构校验不能保证每项总结都准确；可以先导出小批结果检查质量。
+
+接口依据：[DeepSeek 首次调用](https://api-docs.deepseek.com/)、[JSON 输出](https://api-docs.deepseek.com/guides/json_mode/)、[Chat Completions 参数](https://api-docs.deepseek.com/api/create-chat-completion/)。
+
+### 访客使用自己的 API Key
+
+可以实现，登录并非必要条件，调用费用归各自的服务商账号。预生成结果与访客临时分析可以并存。
+
+纯静态页面可以让访客输入 Key 后直连允许跨域访问的服务商；Key 只放在当前页面内存中，刷新即清除，不写入收藏、浏览器长期存储或导出文件。该方式依赖服务商 CORS 支持，浏览器扩展和页面脚本仍可能接触密钥。
+
+面向公开使用更推荐增加一个小型后端：访客输入自己的 Key，页面经 HTTPS 将本次请求交给后端转发到固定服务商域名；后端不保存 Key、不记录请求头，限制请求大小与频率。GitHub Pages 继续承载前端，后端另行部署。当前版本实现预生成发布，没有开放浏览器输入密钥或即时分析入口。
 
 ## 本地预览
 
