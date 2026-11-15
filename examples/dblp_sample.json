@@ -1,0 +1,13 @@
+{
+  "result": {
+    "status": {"@code": "200", "text": "OK"},
+    "hits": {
+      "@total": "273",
+      "@sent": "2",
+      "hit": [
+        {"info": {"authors": {"author": [{"text": "Tao Ren 0001"}, {"text": "Zheyuan Hu 0001"}, {"text": "Jianwei Niu 0002"}, {"text": "Yiming Yao"}]}, "title": "ExplabOff: Towards Explorative and Collaborative Task Offloading via Mutual Information-Enhanced MARL.", "venue": "INFOCOM", "pages": "1-10", "year": "2025", "type": "Conference and Workshop Papers", "access": "closed", "key": "conf/infocom/000100Y25", "doi": "10.1109/INFOCOM55648.2025.11044758", "ee": "https://doi.org/10.1109/INFOCOM55648.2025.11044758", "url": "https://dblp.org/rec/conf/infocom/000100Y25"}},
+        {"info": {"authors": {"author": [{"text": "Yanru Chen 0001"}, {"text": "Yuanyuan Zhang 0007"}, {"text": "Xin Lin"}, {"text": "Tongzhou Xu"}, {"text": "Zhiwen Pan"}, {"text": "Liangyin Chen"}]}, "title": "ZKP-CapBAC: Capability-Based Access Control via On-Chain Zero-Knowledge Proofs for Cross-Domain Hiding Delegation Tree.", "venue": "INFOCOM", "pages": "1-10", "year": "2025", "type": "Conference and Workshop Papers", "access": "closed", "key": "conf/infocom/00010LXPC25", "doi": "10.1109/INFOCOM55648.2025.11044772", "ee": "https://doi.org/10.1109/INFOCOM55648.2025.11044772", "url": "https://dblp.org/rec/conf/infocom/00010LXPC25"}}
+      ]
+    }
+  }
+}

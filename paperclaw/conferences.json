@@ -1,0 +1,163 @@
+[
+  {
+    "name": "SIGCOMM",
+    "title": "ACM International Conference on Applications, Technologies, Architectures, and Protocols for Computer Communication",
+    "category": "计算机网络",
+    "stream": "sigcomm",
+    "dblp_url": "https://dblp.org/db/conf/sigcomm/index.html"
+  },
+  {
+    "name": "MobiCom",
+    "title": "ACM International Conference on Mobile Computing and Networking",
+    "category": "计算机网络",
+    "stream": "mobicom",
+    "dblp_url": "https://dblp.org/db/conf/mobicom/"
+  },
+  {
+    "name": "INFOCOM",
+    "title": "IEEE International Conference on Computer Communications",
+    "category": "计算机网络",
+    "stream": "infocom",
+    "dblp_url": "https://dblp.org/db/conf/infocom/"
+  },
+  {
+    "name": "NSDI",
+    "title": "Symposium on Network System Design and Implementation",
+    "category": "计算机网络",
+    "stream": "nsdi",
+    "dblp_url": "https://dblp.org/db/conf/nsdi/"
+  },
+  {
+    "name": "WWW",
+    "title": "The Web Conference",
+    "category": "交叉/综合/新兴",
+    "stream": "www",
+    "dblp_url": "https://dblp.org/db/conf/www/"
+  },
+  {
+    "name": "RTSS",
+    "title": "IEEE Real-Time Systems Symposium",
+    "category": "交叉/综合/新兴",
+    "stream": "rtss",
+    "dblp_url": "https://dblp.org/db/conf/rtss/"
+  },
+  {
+    "name": "AAAI",
+    "title": "AAAI Conference on Artificial Intelligence",
+    "category": "人工智能",
+    "stream": "aaai",
+    "dblp_url": "https://dblp.org/db/conf/aaai/"
+  },
+  {
+    "name": "NeurIPS",
+    "title": "Conference on Neural Information Processing Systems",
+    "category": "人工智能",
+    "stream": "nips",
+    "dblp_url": "https://dblp.org/db/conf/nips/"
+  },
+  {
+    "name": "ACL",
+    "title": "Annual Meeting of the Association for Computational Linguistics",
+    "category": "人工智能",
+    "stream": "acl",
+    "dblp_url": "https://dblp.org/db/conf/acl/"
+  },
+  {
+    "name": "CVPR",
+    "title": "IEEE/CVF Computer Vision and Pattern Recognition Conference",
+    "category": "人工智能",
+    "stream": "cvpr",
+    "dblp_url": "https://dblp.org/db/conf/cvpr/"
+  },
+  {
+    "name": "ICCV",
+    "title": "International Conference on Computer Vision",
+    "category": "人工智能",
+    "stream": "iccv",
+    "dblp_url": "https://dblp.org/db/conf/iccv/"
+  },
+  {
+    "name": "ICML",
+    "title": "International Conference on Machine Learning",
+    "category": "人工智能",
+    "stream": "icml",
+    "dblp_url": "https://dblp.org/db/conf/icml/"
+  },
+  {
+    "name": "ICLR",
+    "title": "International Conference on Learning Representations",
+    "category": "人工智能",
+    "stream": "iclr",
+    "dblp_url": "https://dblp.org/db/conf/iclr/"
+  },
+  {
+    "name": "STOC",
+    "title": "ACM Symposium on the Theory of Computing",
+    "category": "计算机科学理论",
+    "stream": "stoc",
+    "dblp_url": "https://dblp.org/db/conf/stoc/"
+  },
+  {
+    "name": "SODA",
+    "title": "ACM-SIAM Symposium on Discrete Algorithms",
+    "category": "计算机科学理论",
+    "stream": "soda",
+    "dblp_url": "https://dblp.org/db/conf/soda/"
+  },
+  {
+    "name": "CAV",
+    "title": "International Conference on Computer Aided Verification",
+    "category": "计算机科学理论",
+    "stream": "cav",
+    "dblp_url": "https://dblp.org/db/conf/cav/"
+  },
+  {
+    "name": "FOCS",
+    "title": "IEEE Annual Symposium on Foundations of Computer Science",
+    "category": "计算机科学理论",
+    "stream": "focs",
+    "dblp_url": "https://dblp.org/db/conf/focs/"
+  },
+  {
+    "name": "LICS",
+    "title": "ACM/IEEE Symposium on Logic in Computer Science",
+    "category": "计算机科学理论",
+    "stream": "lics",
+    "dblp_url": "https://dblp.org/db/conf/lics/"
+  },
+  {
+    "name": "SIGMOD",
+    "title": "ACM SIGMOD Conference",
+    "category": "数据库/数据挖掘/内容检索",
+    "stream": "sigmod",
+    "dblp_url": "https://dblp.org/db/conf/sigmod/"
+  },
+  {
+    "name": "SIGKDD",
+    "title": "ACM SIGKDD Conference on Knowledge Discovery and Data Mining",
+    "category": "数据库/数据挖掘/内容检索",
+    "stream": "kdd",
+    "dblp_url": "https://dblp.org/db/conf/kdd/"
+  },
+  {
+    "name": "ICDE",
+    "title": "IEEE International Conference on Data Engineering",
+    "category": "数据库/数据挖掘/内容检索",
+    "stream": "icde",
+    "dblp_url": "https://dblp.org/db/conf/icde/"
+  },
+  {
+    "name": "SIGIR",
+    "title": "International ACM SIGIR Conference on Research and Development in Information Retrieval",
+    "category": "数据库/数据挖掘/内容检索",
+    "stream": "sigir",
+    "dblp_url": "https://dblp.org/db/conf/sigir/"
+  },
+  {
+    "name": "VLDB",
+    "title": "International Conference on Very Large Data Bases",
+    "category": "数据库/数据挖掘/内容检索",
+    "stream": "vldb",
+    "dblp_url": "https://dblp.org/db/conf/vldb/"
+  }
+]

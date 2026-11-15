@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'self'">
+  <title>PaperClaw · 论文清单</title>
+  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./site.css">
+  <script src="./katex.min.js" defer></script>
+  <script src="./ui.js" defer></script>
+  <script src="./site.js" defer></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">P<span>aper</span>Claw <small>论文清单</small></div>
+  <div class="exports">
+    <button data-export="csv" disabled>导出 CSV</button>
+    <button data-export="md" disabled>导出 Markdown</button>
+    <button data-export="json" disabled>导出 JSON</button>
+  </div>
+</header>
+<main>
+  <div id="notice" role="alert" hidden></div>
+  <div class="layout">
+    <aside class="panel">
+      <h2>会议</h2>
+      <div id="conferenceChoices"></div>
+      <p id="updated" class="help"></p>
+    </aside>
+    <section class="results">
+      <section class="results-tools">
+        <nav class="library-bar" aria-label="论文清单范围">
+          <button id="allView" aria-pressed="true">全部论文</button>
+          <button id="savedView" aria-pressed="false">我的收藏</button>
+        </nav>
+        <div class="filterbar">
+          <input id="search" type="search" placeholder="搜索标题、作者、关键词或摘要" aria-label="搜索论文">
+          <select id="filterYear" aria-label="筛选年份"><option value="">全部年份</option></select>
+          <select id="filterCategory" aria-label="筛选分类"><option value="">全部分类</option></select>
+        </div>
+        <div class="selection-bar">
+          <button id="selectFiltered" disabled>全选筛选结果</button>
+          <button id="clearSelection" disabled>清除勾选</button>
+          <span id="selectionInfo" aria-live="polite"></span>
+        </div>
+      </section>
+      <div id="groups" class="published-groups"></div>
+      <div class="result-heading">
+        <h2>论文清单 <span id="visibleCount">0</span></h2>
+        <span id="loading" role="status" aria-live="polite">正在读取论文清单…</span>
+        <span id="pageInfo"></span>
+      </div>
+      <div id="papers"></div>
+      <nav class="pagination" aria-label="论文分页">
+        <button id="prev" disabled>上一页</button><span id="pageNumber">1 / 1</span><button id="next" disabled>下一页</button>
+      </nav>
+    </section>
+  </div>
+  <footer>论文元数据与摘要保留来源链接 · 收藏保存在当前浏览器</footer>
+</main>
+</body>
+</html>

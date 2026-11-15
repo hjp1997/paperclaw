@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+data/
+dist/
+.venv/
+test-results/
+_site/
+exports/

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PaperClaw · 会议论文</title><link rel="stylesheet" href="/style.css"><script src="/katex.min.js" defer></script><script src="/ui.js" defer></script><script src="/app.js" defer></script></head>
+<body>
+<header class="topbar"><div class="brand">P<span>aper</span>Claw <small>会议论文</small></div><div class="exports"><button data-export="csv">导出 CSV</button><button data-export="md">导出 Markdown</button><button data-export="json">导出 JSON</button></div></header>
+<main>
+<div id="notice" role="alert" hidden></div>
+<div class="layout"><aside>
+<section class="panel"><h2>采集范围</h2><form id="crawlForm">
+<label class="field">数据源<select id="source"><option value="auto">自动选择来源</option><option value="conference">会议官网 · 论文与摘要</option><option value="openreview">OpenReview · 已接收论文与摘要</option><option value="publisher">出版社网页 · 登录后查询</option><option value="crossref">Crossref · IEEE / ACM 会议</option><option value="usenix">USENIX 官方页面 · NSDI</option><option value="dblp">DBLP 公开目录 · 可能要求验证</option><option value="ieee">IEEE 官方 API · 含摘要</option></select></label>
+<p class="help" id="sourceHint">优先读取适用会议的 OpenReview 已接收论文与摘要，其余会议按出版社选择来源。</p>
+<label id="ieeeKeyField" class="field" hidden>IEEE Metadata API Key<input id="ieeeKey" type="password" autocomplete="off" placeholder="仅本次使用，不保存"></label>
+<div class="source-links"><a id="sourceLink" href="https://search.crossref.org/" target="_blank" rel="noopener noreferrer">打开来源网站 ↗</a><a href="https://developer.ieee.org/" target="_blank" rel="noopener noreferrer">申请 IEEE Key ↗</a></div>
+<fieldset><legend>CCF A 类会议</legend><div id="conferenceChoices"></div></fieldset>
+<details class="catalog"><summary>会议目录与链接</summary><div id="conferenceLinks"></div><button id="refreshCatalog" type="button">从 CCF 目录更新链接</button><p class="help" id="catalogHint">目录：ccf.atom.im。链接指向 DBLP 会议系列；遇到验证时保留已有链接，可手动重试。</p></details>
+<div class="years"><label class="field">起始年份<input id="yearFrom" type="number" min="1980" required></label><span>—</span><label class="field">结束年份<input id="yearTo" type="number" min="1980" required></label></div>
+<section id="publisherFlow" hidden>
+<h3>在出版社网站查询</h3>
+<div id="publisherSteps"></div>
+<label class="field">导入官网导出的 BibTeX 引用<input id="citationFile" type="file" accept=".bib,.bibtex,text/plain"></label>
+<button id="importCitation" type="button">合并到论文清单</button>
+</section>
+<label class="check"><input id="workshops" type="checkbox">包含 Workshop</label>
+<label class="check"><input id="fetchAbstracts" type="checkbox" checked>采集后补全缺失摘要</label>
+<details><summary>OpenAlex Key · 批量补全建议填写</summary><label class="field">OpenAlex API Key<input id="openalexKey" type="password" autocomplete="off" placeholder="可留空；仅本次使用"></label><p class="help">匿名访问额度较小，遇到 429 后可填写自己的 Key，再点“补全筛选结果的摘要”。<a href="https://openalex.org/settings/api" target="_blank" rel="noopener noreferrer">获取 OpenAlex Key ↗</a></p></details>
+<p class="help">有官方议程时按论文匹配奖项和报告类型。点击论文的分类标签可查看出处。</p>
+<div class="actions"><button class="primary" id="start" type="submit">开始采集</button><button id="stop" type="button" disabled>停止</button></div>
+</form></section>
+<details class="panel"><summary>访问与采集说明</summary><p>串行请求，间隔至少 10 秒，24 小时最多 300 次。OpenReview 缓存 1 小时，其他成功响应缓存 24 小时。</p><p>401/403、网站验证或 429 会停止本轮。可手动再次采集，没有额外重试冷却。</p><p>出版社网页登录后可导入官网引用。浏览器验证状态不会传递给采集器。</p></details>
+<details class="panel" id="aiSettings"><summary>AI 摘要分析</summary><label class="field">兼容接口 Base URL<input id="aiBase" type="url" placeholder="https://你的服务/v1" autocomplete="off"></label><label class="field">模型<input id="aiModel" placeholder="模型名称" autocomplete="off"></label><label class="field">API Key<input id="aiKey" type="password" autocomplete="off" placeholder="仅当前页面使用"></label><p class="help">点击单篇“分析摘要”后，将标题和摘要发送到所填服务。费用由该服务决定，分析结果可导出。</p></details>
+<details class="panel"><summary>导入来源 JSON</summary><p class="help">可导入 Crossref / DBLP / IEEE API 原始 JSON。使用上方会议、年份与数据源设置筛选；多页文件可逐一导入。</p><input id="importFile" type="file" accept=".json,application/json" aria-label="选择来源 JSON"><button id="importButton">导入并合并</button></details>
+</aside><section class="results">
+<section class="panel status"><div class="status-header"><span class="dot" id="statusDot"></span><strong id="statusTitle">准备就绪</strong><span id="count">0 篇论文</span></div><p id="message" aria-live="polite">正在连接本地服务…</p><div id="groups"></div></section>
+<section class="results-tools" aria-label="筛选和选择论文">
+<nav class="library-bar" aria-label="论文清单范围"><button id="currentView" aria-pressed="true">最近采集</button><button id="savedView" aria-pressed="false">我的收藏</button><button id="resetCurrent">清空最近采集</button></nav>
+<div class="filterbar"><input type="search" id="search" placeholder="搜索标题、作者、关键词或摘要" aria-label="搜索论文"><select id="filterConference" aria-label="筛选会议"><option value="">全部会议</option><option>INFOCOM</option><option>ICDE</option></select><select id="filterYear" aria-label="筛选年份"><option value="">全部年份</option></select><select id="filterCategory" aria-label="筛选分类"><option value="">全部分类</option></select></div>
+<div class="selection-bar"><button id="selectFiltered">全选筛选结果</button><button id="clearSelection">清除勾选</button><span id="selectionInfo" aria-live="polite"></span></div>
+</section>
+<div class="result-heading"><h2>论文清单 <span id="visibleCount">0</span></h2><div class="abstract-action"><button id="fillAbstracts">补全摘要</button><span id="abstractHint" role="status" aria-live="polite"></span></div><span id="pageInfo"></span></div>
+<div id="papers"><div class="empty"><p>选择会议和年份，然后开始采集。</p></div></div>
+<div class="pagination"><button id="prev">上一页</button><span id="pageNumber">1 / 1</span><button id="next">下一页</button></div>
+</section></div>
+<footer>PaperClaw · 本地运行 · 目录与摘要均保留来源 · OpenReview / Crossref / DBLP / IEEE / USENIX / OpenAlex</footer>
+</main></body></html>

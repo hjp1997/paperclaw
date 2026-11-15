@@ -1,0 +1,19 @@
+.results-tools .filterbar { grid-template-columns:minmax(180px,1fr) 110px 190px; }
+.published-groups { margin-top:10px; }
+.collection-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; padding:8px 0; border-bottom:1px solid var(--line); font-size:12px; }
+.collection-name { font-weight:600; }
+.collection-count { color:var(--muted); }
+.collection-row button { margin-left:auto; min-height:28px; padding:3px 9px; font-size:12px; }
+.collection-row button[aria-pressed=true] { color:var(--green); background:#eaf3eb; }
+#loading { font-size:12px; color:var(--muted); }
+#updated { margin-bottom:0; }
+.venue-leaf .venue-count { margin-left:auto; color:var(--muted); font-size:11px; }
+.paper details.abstract { line-height:1.8; }
+@media (max-width:1180px) {
+  .results-tools .filterbar { grid-template-columns:1fr 1.6fr; }
+  .results-tools #search { grid-column:1 / -1; }
+}
+@media (max-width:730px) {
+  .layout > aside { margin-bottom:0; }
+  .venue-group { padding-bottom:4px; }
+}
