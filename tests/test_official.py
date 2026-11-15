@@ -10,6 +10,27 @@ from paperclaw.program import parse_program
 
 
 class OfficialTests(unittest.TestCase):
+    def test_separate_official_abstract_index_matches_event_ids_and_skips_session_heading(self):
+        from paperclaw.official import records
+        from paperclaw.program import program_url
+        item = {"id":42, "name":"Real paper", "eventtype":"Poster", "authors":[], "virtualsite_url":"/virtual/2026/poster/42"}
+        raw = json.dumps({"count":2,"results":[item,{**item,"id":99,"name":"Oral Presentations","eventtype":"Oral"}]}).encode()
+        def transport(url):
+            return 200, {}, json.dumps({"42":"Complete official abstract.","43":"Another paper."}).encode() if url.endswith("-abstracts.json") else raw
+        with tempfile.TemporaryDirectory() as directory:
+            client = SafeClient(directory, transport=transport, interval=0)
+            rows = records(client,"ICML",2026,threading.Event(),lambda m:None)
+        self.assertEqual(len(rows),1)
+        self.assertEqual(rows[0]["abstract"],"Complete official abstract.")
+        self.assertTrue(program_url("ICML",2026,"abstracts").endswith("icml-2026-abstracts.json"))
+        with tempfile.TemporaryDirectory() as directory:
+            client = SafeClient(directory, transport=lambda url: (404,{},b'{}') if url.endswith('-abstracts.json') else (200,{},raw), interval=0)
+            fallback = records(client,"ICML",2026,threading.Event(),lambda m:None)
+        self.assertEqual(fallback[0]["title"],"Real paper")
+        self.assertEqual(fallback[0]["abstract"],"")
+        with self.assertRaises(ValueError):
+            parse_program(b'{"42":{"abstract":"Unexpected shape"}}',"ICML",2026,"abstracts")
+
     def test_landing_page_reads_the_entire_abstract(self):
         html = b"""<html><h1>Some paper</h1><div id="abstractText" class="abstract-text collapsed">
         <p>First paragraph.</p><ul><li>Result one.</li><li>Result two.</li></ul><p>The final sentence.</p>

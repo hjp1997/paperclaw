@@ -37,6 +37,11 @@ on:
         description: "本轮最多分析篇数（1–1000，已完成项自动跳过）"
         type: string
         default: "50"
+      analysis_scope:
+        description: "AI 分析范围：featured=特别分类（排除常规 Poster），all=全部有摘要论文"
+        type: choice
+        options: [featured, all]
+        default: featured
 
 permissions:
   contents: read
@@ -85,8 +90,9 @@ jobs:
           PAGES_CONFERENCES: ${{ inputs.conferences }}
           PAGES_YEARS: ${{ inputs.years }}
           ANALYSIS_LIMIT: ${{ inputs.analysis_limit }}
+          ANALYSIS_SCOPE: ${{ inputs.analysis_scope }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-        run: python pages.py analyze --conferences "$PAGES_CONFERENCES" --years "$PAGES_YEARS" --limit "$ANALYSIS_LIMIT"
+        run: python pages.py analyze --conferences "$PAGES_CONFERENCES" --years "$PAGES_YEARS" --limit "$ANALYSIS_LIMIT" --scope "$ANALYSIS_SCOPE"
       - name: Save public JSON and analysis checkpoints
         if: "!cancelled() && github.event_name == 'workflow_dispatch' && (inputs.refresh || inputs.analyze) && steps.collect.outcome != 'failure'"
         env:

@@ -54,8 +54,21 @@ def parse_arxiv(raw):
 
 
 def records(client, conference, year, cancel, progress):
-    return client.get("program", {"conference":conference, "year":year, "part":"program", "content_version":2},
+    rows = client.get("program", {"conference":conference, "year":year, "part":"program", "content_version":3},
                       f"conference:{conference}:{year}", cancel, progress)["annotations"]
+    if conference in VIRTUAL and any(not row.get("abstract") for row in rows):
+        from .core import CrawlError, Cancelled
+        try:
+            progress(f"{conference} {year}：读取独立的官方摘要索引")
+            abstracts = client.get("program", {"conference":conference, "year":year, "part":"abstracts", "content_version":1},
+                                   f"conference:{conference}:{year}", cancel, progress)["annotations"]
+            by_id = {item["event_id"]:item["abstract"] for item in abstracts}
+            rows = [{**row, "abstract":row.get("abstract") or by_id.get(row.get("event_id", ""), "")} for row in rows]
+        except Cancelled:
+            raise
+        except CrawlError:
+            progress(f"{conference} {year}：独立摘要索引暂不可用，保留论文目录和已有摘要。")
+    return rows
 
 
 def crawl(client, conference, year, cancel, on_page, progress):

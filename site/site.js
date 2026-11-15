@@ -13,6 +13,45 @@ const sources = {openalex:"OpenAlex", openreview:"OpenReview", conference_site:"
 let manifest, papers = [], currentGroups = [], view = "all", page = 1, generation = 0, loading = false;
 let bookmarkState = readSaved();
 let saved = bookmarkState.papers, legacyGroups = bookmarkState.legacyGroups;
+let cloudTerm = null;
+const regularLabels = new Set(["poster", "regular", "accept", "accept (regular)", "accept (poster)", "main", "main track", "research track", "full paper"]);
+const genericWords = new Set(["paper", "propose", "proposed", "approach", "method", "methods", "model", "models", "learning", "using", "based", "results", "novel", "efficient", "framework", "data", "study", "analysis", "performance", "problem", "large", "neural", "deep", "training", "new", "via", "test", "general", "towards", "networks", "network"]);
+
+function featured(paper) {
+  return (paper.categories || []).some(label => label.trim() && !regularLabels.has(label.trim().toLowerCase()));
+}
+
+function cloudTerms(paper, mode) {
+  if (mode === "topics") return [...new Set(paper.ai_analysis?.topics || [])];
+  return [...new Set((paper.ai_analysis?.keyphrases || paper.keywords || []).map(word => word.trim().toLowerCase()).filter(word =>
+    word.length > 2 && word.length <= 60 && !genericWords.has(word)))];
+}
+
+function renderCloud() {
+  const mode = $("cloudSource").value, counts = new Map();
+  let covered = 0;
+  for (const paper of filtered(true)) {
+    const words = cloudTerms(paper, mode);
+    if (words.length) covered++;
+    for (const word of words) counts.set(word, (counts.get(word) || 0) + 1);
+  }
+  const terms = [...counts].sort((a,b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0,40);
+  const max = terms[0]?.[1] || 1;
+  $("wordCloud").replaceChildren(...terms.map(([word,count]) => {
+    const label = mode === "topics" ? (manifest.topics?.[word] || word) : word;
+    const button = el("button", "cloud-word weight-" + Math.round(4 * Math.log(count + 1) / Math.log(max + 1)));
+    button.type = "button"; button.append(label, el("sup", "", count));
+    button.setAttribute("aria-label", label + "，" + count + " 篇论文");
+    button.setAttribute("aria-pressed", String(cloudTerm?.mode === mode && cloudTerm.id === word));
+    button.onclick = () => { cloudTerm = cloudTerm?.mode === mode && cloudTerm.id === word ? null : {mode,id:word,label}; page = 1; render(); };
+    return button;
+  }));
+  if (!terms.length) $("wordCloud").append(el("p", "help", mode === "topics" ? "当前范围尚无 AI Topic。" : "当前范围暂无关键词。"));
+  $("cloudInfo").textContent = covered + " 篇覆盖 · " + terms.length + " 个索引";
+  $("wordCloud").title = mode === "topics" ? "标签来自预生成 AI Topic" : "优先使用 AI 提取的研究短语，其余使用论文元数据或本地关键词";
+  $("clearCloud").hidden = !cloudTerm;
+  $("clearCloud").textContent = cloudTerm ? "清除：" + cloudTerm.label : "清除词云筛选";
+}
 
 function notice(text) {
   $("notice").textContent = text;
@@ -121,7 +160,7 @@ async function loadPapers() {
     renderGroups();
     const category = $("filterCategory").value;
     const labels = [...new Set(papers.flatMap(p => p.categories || []))].sort();
-    $("filterCategory").replaceChildren(new Option("全部分类", ""), new Option("暂无分类标签", "__none__"),
+    $("filterCategory").replaceChildren(new Option("全部分类", ""), new Option("特别分类（非普通 Poster）", "__featured__"), new Option("暂无分类标签", "__none__"),
       ...labels.map(label => new Option(label, label)));
     if ([...$("filterCategory").options].some(option => option.value === category)) $("filterCategory").value = category;
     const topic = $("filterTopic").value;
@@ -136,12 +175,14 @@ async function loadPapers() {
   }
 }
 
-function filtered() {
+function filtered(ignoreCloud = false) {
   const text = $("search").value.trim().toLowerCase(), category = $("filterCategory").value, topic = $("filterTopic").value;
-  return papers.filter(p => (!category || (category === "__none__" ? !p.categories?.length : p.categories?.includes(category))) &&
+  return papers.filter(p => (!category || (category === "__featured__" ? featured(p) : category === "__none__" ? !p.categories?.length : p.categories?.includes(category))) &&
     (!topic || (topic === "__none__" ? !p.ai_analysis : p.ai_analysis?.topics.includes(topic))) &&
+    (ignoreCloud || !cloudTerm || cloudTerms(p,cloudTerm.mode).includes(cloudTerm.id)) &&
     (!text || [p.title, p.title_text, p.abstract, p.doi, ...p.authors, ...p.keywords,
       ...(p.ai_analysis?.topics || []).map(id => manifest.topics?.[id] || id),
+      ...(p.ai_analysis?.keyphrases || []),
       ...["problem", "method", "results"].map(field => p.ai_analysis?.[field] || "")].join(" ").toLowerCase().includes(text)));
 }
 
@@ -180,7 +221,14 @@ function paperCard(p) {
   }
   card.append(top, paperTitle(p), el("p", "authors", p.authors.join(" · ")));
   const keywords = el("div", "keywords");
-  for (const word of p.keywords) keywords.append(el("span", "keyword", word));
+  for (const word of p.ai_analysis?.keyphrases || p.keywords) {
+    const chip = el(p.ai_analysis?.keyphrases ? "button" : "span", "keyword", word);
+    if (p.ai_analysis?.keyphrases) {
+      chip.type = "button"; chip.title = "AI 提取的原文研究短语 · 点击筛选论文";
+      chip.onclick = () => { $("cloudSource").value = "keywords"; cloudTerm = {mode:"keywords",id:word.toLowerCase(),label:word}; page = 1; render(); };
+    }
+    keywords.append(chip);
+  }
   card.append(keywords);
   if (p.ai_analysis) {
     const topics = el("div", "ai-topics");
@@ -198,6 +246,8 @@ function paperCard(p) {
   if (p.publisher_url || p.url) bottom.append(link("论文页面 ↗", p.publisher_url || p.url));
   if (p.pdf_url) bottom.append(link("PDF ↗", p.pdf_url));
   if (p.dblp_url) bottom.append(link("DBLP ↗", p.dblp_url));
+  const chat = el("button", "paper-chat", "与 AI 讨论");
+  chat.type = "button"; chat.onclick = () => window.PaperClawChat.open(p); bottom.append(chat);
   card.append(bottom);
   if (p.abstract) {
     const detail = el("details", "abstract");
@@ -250,6 +300,7 @@ function render() {
   $("prev").disabled = page === 1;
   $("next").disabled = page === pages;
   renderSelection(rows);
+  if (manifest) renderCloud();
   const cards = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map(paperCard);
   if (!cards.length) {
     let empty = "没有匹配的论文，请调整会议或筛选条件。";
@@ -285,7 +336,7 @@ function conferenceTree() {
 }
 
 function setView(next) {
-  view = next; selected.clear(); $("search").value = ""; $("filterYear").value = ""; $("filterCategory").value = ""; $("filterTopic").value = "";
+  view = next; selected.clear(); cloudTerm = null; $("search").value = ""; $("filterYear").value = ""; $("filterCategory").value = ""; $("filterTopic").value = "";
   $("allView").setAttribute("aria-pressed", String(view === "all"));
   $("savedView").setAttribute("aria-pressed", String(view === "saved"));
   loadPapers();
@@ -304,6 +355,7 @@ function exportRows(rows, format) {
     };
     const fields = manifest.export_fields;
     const csvRow = row => ({...row, topics:(row.ai_analysis?.topics || []).map(id => manifest.topics?.[id] || id),
+      ai_keyphrases:row.ai_analysis?.keyphrases,
       ai_problem:row.ai_analysis?.problem, ai_method:row.ai_analysis?.method,
       ai_results:row.ai_analysis?.results, ai_model:row.ai_analysis?.model});
     return "\uFEFF" + [fields.map(cell).join(","), ...clean.map(csvRow).map(row => fields.map(field => cell(row[field])).join(","))].join("\r\n") + "\r\n";
@@ -322,6 +374,7 @@ function exportRows(rows, format) {
       labels, "", escape(p.abstract) || "来源尚未提供摘要。", "",
       ...(p.ai_analysis ? ["### AI 总结 · 摘要级", "",
         "- Topic · " + p.ai_analysis.topics.map(id => escape(manifest.topics?.[id] || id)).join("; "),
+        "- 研究关键词 · " + (p.ai_analysis.keyphrases || []).map(escape).join("; "),
         "- 研究问题 · " + escape(p.ai_analysis.problem), "- 方法 · " + escape(p.ai_analysis.method),
         "- 结果 · " + escape(p.ai_analysis.results),
         "- 模型 · " + escape(p.ai_analysis.provider + " / " + p.ai_analysis.model), ""] : [])
@@ -358,6 +411,8 @@ async function exportFile(format) {
 $("allView").onclick = () => setView("all");
 $("savedView").onclick = () => setView("saved");
 $("filterYear").onchange = () => loadPapers();
+$("cloudSource").onchange = () => { cloudTerm = null; page = 1; render(); };
+$("clearCloud").onclick = () => { cloudTerm = null; page = 1; render(); };
 for (const id of ["search", "filterCategory", "filterTopic"]) $(id).addEventListener("input", () => { page = 1; render(); });
 $("selectFiltered").onclick = () => { for (const paper of filtered()) selected.add(paper._key); render(); };
 $("clearSelection").onclick = () => { selected.clear(); render(); };

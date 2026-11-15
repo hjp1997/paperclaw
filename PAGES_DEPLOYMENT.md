@@ -74,7 +74,7 @@ python pages.py build
 
 ## 预生成 Topic 和摘要级总结
 
-已接入 DeepSeek 官方 Chat Completions 接口，默认模型为 `deepseek-flash`，关闭思考并要求 JSON 输出。每篇只发送标题和摘要，生成 1–5 个 Topic 及中文研究问题、方法、结果三项总结。摘要没有报告具体结果时会要求模型明确写出这一点。总结按摘要级内容标记，不等同于全文评阅。
+已接入 DeepSeek 官方 Chat Completions 接口，默认模型为 `deepseek-flash`，关闭思考并要求 JSON 输出。每篇只发送标题和摘要，生成 1–5 个 Topic、研究关键词短语及中文研究问题、方法、结果三项总结。研究短语必须逐字出现在标题或摘要中。摘要没有报告具体结果时会要求模型明确写出这一点。总结按摘要级内容标记，不等同于全文评阅。
 
 网站支持 Topic 筛选、点击 Topic 标签筛选、搜索总结内容，以及随 CSV / Markdown / JSON 导出。AI Topic 独立于 Oral、Highlight、Best Paper 等会议官方分类。每个 Topic 必须附带可在标题或摘要中找到的原文依据，鼠标悬停标签可查看；模型虚构或改写的引文不会通过校验。
 
@@ -83,7 +83,7 @@ python pages.py build
 1. 在仓库 [Settings → Secrets and variables → Actions](https://github.com/hjp1997/paperclaw/settings/secrets/actions) 添加 Repository secret `DEEPSEEK_API_KEY`，值填 DeepSeek Key。不要把密钥放入代码、论文字段或 workflow 输入。
 2. 打开 [Actions → Publish PaperClaw](https://github.com/hjp1997/paperclaw/actions/workflows/pages.yml)，点击 **Run workflow**。
 3. 若已有论文数据，保持“发布前重新采集指定会议”关闭。填会议、年份，例如 `ICLR` / `2025`。
-4. 勾选“生成 AI Topic 和中文摘要总结”，首次将本轮篇数设为 `5`，核对质量后可改为 `50` 或其他 1–1000 的值。
+4. 勾选“生成 AI Topic 和中文摘要总结”，默认 `analysis_scope=featured`，只处理带特别分类的论文，排除仅有 Poster、Regular 或无标签的记录。Oral、Spotlight、Highlight、获奖等分类会纳入。选择 `all` 可处理所有有摘要论文。首次将本轮篇数设为 `5`，核对质量后可改为 `50` 或其他 1–1000 的值。
 5. 运行结束后，结果自动保存到 `site-data`、提交并发布。普通推送和不勾选 AI 的发布均不会调用模型；访客阅读预生成结果不需要 API Key。
 
 没有摘要的论文自动跳过；标题、摘要、词表版本和模型未变化的已完成记录也会跳过。再次运行可接着处理剩余论文。每完成一篇就保存检查点；接口错误或格式错误会立即停止，不自动重试，也不添加重试暂停。工作流在失败时仍提交已完成的检查点，失败轮次不会替换线上版本。下一轮成功后继续发布。
@@ -97,22 +97,34 @@ python pages.py build
 python pages.py analyze --conferences ICLR --years 2025 --dry-run
 # 实际调用，最多生成 5 篇
 python pages.py analyze --conferences ICLR --years 2025 --limit 5
+# 包含常规 Poster 在内的全部有摘要论文
+python pages.py analyze --conferences ICLR --years 2025 --scope all --limit 5
 python pages.py build
 ```
 
-Topic 词表位于 `paperclaw/analysis.py` 的 `TOPICS`，覆盖网络、系统、AI、数据库、理论和交叉应用。修改标签含义或提示词规则时应同时递增 `VERSION`，使旧结果失效。提示词与结构校验不能保证每项总结都准确；可以先导出小批结果检查质量。
+Topic 词表位于 `paperclaw/analysis.py` 的 `TOPICS`，覆盖网络、系统、AI、数据库、理论和交叉应用。修改核心标签含义或总结规则时应同时递增 `VERSION`，使旧结果失效。研究关键词是兼容旧 v2 结果的可选扩展，旧分析不需要付费重生成；如需为旧分析补充关键词，可使用 `--force`。提示词与结构校验不能保证每项总结都准确；可以先导出小批结果检查质量。
 
 接口依据：[DeepSeek 首次调用](https://api-docs.deepseek.com/)、[JSON 输出](https://api-docs.deepseek.com/guides/json_mode/)、[Chat Completions 参数](https://api-docs.deepseek.com/api/create-chat-completion/)。
 
 ### 访客使用自己的 API Key
 
-可以实现，登录并非必要条件，调用费用归各自的服务商账号。预生成结果与访客临时分析可以并存。
+已实现。右上角点击“连接我的 AI”，填写自己的 Key；支持 DeepSeek（默认 `deepseek-flash`）及其他兼容 Chat Completions 的 HTTPS 接口。点击某篇论文的“与 AI 讨论”，即可围绕该篇标题与摘要进行多轮对话，无需登录。
 
-纯静态页面可以让访客输入 Key 后直连允许跨域访问的服务商；Key 只放在当前页面内存中，刷新即清除，不写入收藏、浏览器长期存储或导出文件。该方式依赖服务商 CORS 支持，浏览器扩展和页面脚本仍可能接触密钥。
+Key 只放在当前页面内存中，刷新即清除，不写入收藏、浏览器长期存储或导出文件；每篇论文的对话独立，也仅保存在本页。切换服务地址时须重新输入 Key，不会把原服务密钥自动发往另一个地址。请求不跟随跳转、不附带浏览器登录 Cookie。调用费用归访客自己的服务商账号，不使用仓库的批量生成 Secret。
 
-面向公开使用更推荐增加一个小型后端：访客输入自己的 Key，页面经 HTTPS 将本次请求交给后端转发到固定服务商域名；后端不保存 Key、不记录请求头，限制请求大小与频率。GitHub Pages 继续承载前端，后端另行部署。当前版本实现预生成发布，没有开放浏览器输入密钥或即时分析入口。
+纯静态直连依赖服务商 CORS 支持，浏览器扩展和页面脚本仍可能接触密钥。DeepSeek 跨域预检已通过；其他服务若拒绝跨域，页面会提示原因，需要改用允许跨域的接口或自行部署受控后端代理。后端应限制服务域名、请求大小和频率，避免记录 Key。GitHub Pages 可继续承载前端。
+
+聊天提供“问题与贡献、拆解方法、证据与待核实项、研究关键词”四个提问入口。提示词借鉴科研阅读与证据核验的结构：区分作者主张、已报告结果、推断和未知；不会仅凭摘要给接收评分、断言创新性或把摘要未报告的信息判为论文缺陷。没有自动加载全文或检索外部文献。
+
+## 词云索引与摘要来源
+
+“主题索引”支持研究关键词与 AI Topic 两种视图。每个词按关联论文数显示大小，数字按论文去重计数；点击即可筛选相关论文，再次点击或清除可恢复。词云会跟随会议、年份、搜索、分类和收藏范围变化，展示频次最高的 40 项。研究关键词优先使用 AI 从原文提取的短语，其余使用已有元数据或本地标题/摘要关键词；AI Topic 仅覆盖已生成分析的论文。
+
+ICML 等官网可能把摘要与目录拆开发布。例如 ICML 2026 目录为 `icml-2026-orals-posters.json`，摘要在单独的 `icml-2026-abstracts.json`，按官方事件 ID 对应。采集器现会在目录缺摘要时读取这一索引；不能读取时保留目录和已有摘要。静态站不会在访客打开页面时重新爬取来源，需要更新 `site-data` 后发布。
 
 ## 本地预览
+
+开发验证使用 `python -m unittest discover -s tests -q`。浏览器回归脚本为 `tests/browser_ai.cjs`：先用 `python tests/browser_fixture.py` 构建测试数据，通过端口 18766 提供 `test-results/pages-browser` 静态服务，再使用已安装的 Playwright / Chromium 运行该脚本（`PAPER_BROWSER` 指向浏览器）。测试仅模拟 AI 接口，不使用真实 Key 或产生调用费用。
 
 Python 3.10+ 即可，使用仓库中的脚本构建后启动静态服务。
 

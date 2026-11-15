@@ -12,7 +12,7 @@ from pathlib import Path
 
 from paperclaw.catalog import CATALOG
 from paperclaw.core import EXPORT_FIELDS, CrawlError, atomic_json, read_json, safe_url
-from paperclaw.analysis import MODEL, TOPICS, analyze_paper, public_analysis
+from paperclaw.analysis import MODEL, TOPICS, analyze_paper, is_featured, public_analysis
 from paperclaw.instance import InstanceLock
 from paperclaw.server import Application
 from paperclaw.titles import prepare_title
@@ -128,10 +128,15 @@ def build(data_dir, output):
     if not groups:
         raise ValueError("site-data 中还没有论文数据，请先运行 import 或 collect。")
     output.mkdir(parents=True,exist_ok=True)
-    for filename in ("index.html","site.js","site.css"):
+    for filename in ("index.html","site.js","site.css","chat.js"):
         shutil.copyfile(ROOT / "site" / filename, output / filename)
     for filename in ("style.css","ui.js","katex.min.js","katex.LICENSE"):
         shutil.copyfile(ROOT / "web" / filename, output / filename)
+    html = (output / "index.html").read_text("utf-8")
+    for filename in ("site.js","chat.js","site.css","ui.js","style.css","katex.min.js"):
+        digest = hashlib.sha256((output / filename).read_bytes()).hexdigest()[:12]
+        html = html.replace(f'"./{filename}"', f'"./{filename}?v={digest}"')
+    (output / "index.html").write_text(html, encoding="utf-8")
     (output / ".nojekyll").write_text("",encoding="utf-8")
     atomic_json(output / "manifest.json", {
         "schema_version":1, "updated_at":timestamp(),
@@ -139,7 +144,7 @@ def build(data_dir, output):
         "catalog":[dict(v) for v in CATALOG.values()],
         "topics":TOPICS,
         "export_fields":[field for field in EXPORT_FIELDS if field != "ai_summary"] +
-                        ["topics", "ai_problem", "ai_method", "ai_results", "ai_model"],
+                        ["topics", "ai_keyphrases", "ai_problem", "ai_method", "ai_results", "ai_model"],
     })
     print(f"Built {len(groups)} collections in {output.resolve()}",flush=True)
 
@@ -181,7 +186,10 @@ def analyze(args):
         raise ValueError("请选择有效的会议和年份。")
     if not 1 <= args.limit <= 1000:
         raise ValueError("每轮分析篇数必须在 1–1000 之间。")
-    batches, total, ready, missing = [], 0, 0, 0
+    scope = getattr(args, "scope", "featured")
+    if scope not in ("featured", "all"):
+        raise ValueError("分析范围必须为 featured 或 all。")
+    batches, total, ready, missing, excluded = [], 0, 0, 0, 0
     for path in sorted(args.data_dir.glob("*.json")):
         rows = load_input(path)
         pending = []
@@ -189,7 +197,9 @@ def analyze(args):
             if paper["conference"] not in conferences or paper["year"] not in years:
                 continue
             total += 1
-            if not paper["abstract"].strip():
+            if scope == "featured" and not is_featured(paper):
+                excluded += 1
+            elif not paper["abstract"].strip():
                 missing += 1
             elif not args.force and paper.get("ai_analysis", {}).get("model") == args.model:
                 ready += 1
@@ -200,7 +210,7 @@ def analyze(args):
     if not total:
         raise ValueError("指定会议和年份尚无已采集数据，请先采集或导入。")
     pending_count = sum(len(items) for _, _, items in batches)
-    print(f"范围 {total} 篇；已完成 {ready}；缺摘要 {missing}；待分析 {pending_count}；本轮上限 {args.limit}。", flush=True)
+    print(f"范围 {total} 篇；分类筛选跳过 {excluded}；已完成 {ready}；缺摘要 {missing}；待分析 {pending_count}；本轮上限 {args.limit}。", flush=True)
     if args.dry_run or not pending_count:
         return
     key = os.getenv("DEEPSEEK_API_KEY", "").strip()
@@ -239,6 +249,7 @@ def main():
     analyzer.add_argument("--years",required=True)
     analyzer.add_argument("--model",default=MODEL)
     analyzer.add_argument("--limit",type=int,default=50)
+    analyzer.add_argument("--scope",choices=("featured","all"),default="featured",help="Featured classifications (excluding regular posters), or all papers with abstracts.")
     analyzer.add_argument("--dry-run",action="store_true",help="Show counts without contacting the AI service.")
     analyzer.add_argument("--force",action="store_true",help="Regenerate existing analyses within the limit.")
     for item in (importer,builder,collector,analyzer):

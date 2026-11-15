@@ -13,6 +13,7 @@ from paperclaw.core import CrawlError, normalize
 
 
 CONTENT = {"topics": ["networking", "optimization"],
+           "keyphrases":["online scheduling", "network resource allocation"],
            "topic_evidence": {"networking": "network resource allocation", "optimization": "online scheduling"}, "problem": "优化网络资源分配。",
            "method": "通过在线算法进行调度。", "results": "摘要未报告具体结果。"}
 
@@ -49,11 +50,14 @@ class AnalysisTests(unittest.TestCase):
         result = pages.public_paper(original)
         self.assertEqual(result["ai_analysis"]["topics"], CONTENT["topics"])
         self.assertNotIn("PRIVATE", json.dumps(result))
+        result["ai_analysis"].pop("keyphrases")
+        self.assertIsNotNone(analysis.public_analysis(result))
 
     def test_invalid_truncated_and_error_responses_are_not_saved_or_echoed(self):
         for content, status, finish in [({**CONTENT, "topics": ["Oral"]}, 200, "stop"),
                                       ({**CONTENT, "topics": ["networking"] * 2}, 200, "stop"),
                                       ({**CONTENT, "results": ""}, 200, "stop"),
+                                      ({**CONTENT, "keyphrases":["invented topic"]}, 200, "stop"),
                                       ({**CONTENT, "topic_evidence": {"networking": "invented quote", "optimization": "online scheduling"}}, 200, "stop"),
                                       ({**CONTENT, "method": "secret-test-key"}, 200, "stop"),
                                       (CONTENT, 200, "length"), (CONTENT, 429, "stop")]:
@@ -82,7 +86,7 @@ class AnalysisTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 pages.save_collections([paper(1), paper(2), missing], directory)
             args = SimpleNamespace(data_dir=directory, conferences="INFOCOM", years="2025", limit=2,
-                                   force=False, dry_run=False, model=analysis.MODEL)
+                                   force=False, dry_run=False, model=analysis.MODEL, scope="all")
             path = directory / "infocom-2025.json"
             real = lambda p, key, model: analysis.analyze_paper(p, key, model, transport=transport())
             with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "secret-test-key"}), contextlib.redirect_stdout(io.StringIO()):
@@ -113,7 +117,7 @@ class AnalysisTests(unittest.TestCase):
             path = directory / "infocom-2025.json"
             before = path.read_bytes()
             args = SimpleNamespace(data_dir=directory, conferences="INFOCOM", years="2025", limit=50,
-                                   force=False, dry_run=True, model=analysis.MODEL)
+                                   force=False, dry_run=True, model=analysis.MODEL, scope="all")
             with patch.dict("os.environ", {}, clear=True), patch.object(pages, "analyze_paper") as run:
                 pages.analyze(args)
                 args.dry_run = False
@@ -121,6 +125,23 @@ class AnalysisTests(unittest.TestCase):
                     pages.analyze(args)
                 run.assert_not_called()
             self.assertEqual(path.read_bytes(), before)
+
+    def test_featured_scope_skips_regular_posters_and_unclassified_papers(self):
+        with tempfile.TemporaryDirectory() as temp, contextlib.redirect_stdout(io.StringIO()):
+            directory = Path(temp)
+            rows = [paper(i) for i in range(5)]
+            for row, labels in zip(rows, [[], ["Poster"], ["Poster", "Oral"], ["Best Paper Award"], ["Accept (regular)"]]):
+                row["categories"] = labels
+            pages.save_collections(rows, directory)
+            args = SimpleNamespace(data_dir=directory, conferences="INFOCOM", years="2025", limit=50,
+                                   force=False, dry_run=False, model=analysis.MODEL, scope="featured")
+            real = lambda p, key, model: analysis.analyze_paper(p, key, model, transport=transport())
+            with patch.dict("os.environ", {"DEEPSEEK_API_KEY":"secret-test-key"}), patch.object(pages, "analyze_paper", side_effect=real) as run:
+                pages.analyze(args)
+                self.assertEqual({p.args[0]["title"] for p in run.call_args_list}, {"Paper 2", "Paper 3"})
+                args.scope = "all"
+                pages.analyze(args)
+                self.assertEqual(run.call_count, 5)
 
 
 if __name__ == "__main__":

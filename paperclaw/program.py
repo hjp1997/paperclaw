@@ -30,6 +30,8 @@ PUBLISHED_AWARDS = {
 
 
 def program_url(conference, year, part="program"):
+    if part == "abstracts" and conference in VIRTUAL:
+        return f"https://{VIRTUAL[conference]}/static/virtual/data/{conference.lower()}-{year}-abstracts.json"
     if part == "schedule":
         if conference == "CVPR" and year == 2025:
             return f"https://cvpr.thecvf.com/Conferences/{year}/AcceptedPapers"
@@ -85,6 +87,12 @@ def parse_award_index(raw):
 
 
 def parse_program(raw, conference, year, part="program"):
+    if part == "abstracts":
+        data = json.loads(raw)
+        if (not isinstance(data, dict) or not data or
+                any(not str(key).isdigit() or not isinstance(value, str) for key, value in data.items())):
+            raise ValueError("Unknown abstract index format")
+        return {"annotations":[{"event_id":str(key), "abstract":value} for key,value in data.items() if value.strip()]}
     if part == "schedule" and conference == "CVPR":
         rows = []
         saw_papers = False
@@ -238,11 +246,13 @@ def virtual_program(raw, conference, year):
         raise ValueError("Incomplete program")
     rows = []
     for item in items:
+        if re.fullmatch(r"(?:Oral Presentations?|Poster Session(?: \d+)?)", item.get("name") or "", re.I):
+            continue
         fields = " ".join(str(item.get(k) or "") for k in ("eventtype", "event_type", "decision", "session"))
         labels = [label for label in ("Oral","Spotlight","Highlight","Poster")
                   if re.search(r"\b" + label + r"s?\b", fields, re.I)]
         if labels and item.get("name"):
-            rows.append({"title":item["name"], "labels":labels,
+            rows.append({"title":item["name"], "labels":labels, "event_id":str(item.get("id") or ""),
                          "abstract":item.get("abstract") or "", "abstract_source":"conference_site",
                          "authors":[author.get("fullname", "") for author in item.get("authors", []) if isinstance(author, dict)],
                          "keywords":item.get("keywords") or [], "pdf_url":item.get("paper_pdf_url") or "",

@@ -3,18 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https:; img-src 'self' data:; base-uri 'self'; form-action 'self'; object-src 'none'">
   <title>PaperClaw · 论文清单</title>
   <link rel="stylesheet" href="./style.css">
   <link rel="stylesheet" href="./site.css">
   <script src="./katex.min.js" defer></script>
   <script src="./ui.js" defer></script>
+  <script src="./chat.js" defer></script>
   <script src="./site.js" defer></script>
 </head>
 <body>
 <header class="topbar">
   <div class="brand">P<span>aper</span>Claw <small>论文清单</small></div>
   <div class="exports">
+    <button id="aiSettings" type="button">连接我的 AI</button>
     <button data-export="csv" disabled>导出 CSV</button>
     <button data-export="md" disabled>导出 Markdown</button>
     <button data-export="json" disabled>导出 JSON</button>
@@ -48,6 +50,15 @@
           <span id="selectionInfo" aria-live="polite"></span>
         </div>
       </section>
+      <section class="topic-cloud" aria-label="关键词词云索引">
+        <div class="cloud-heading">
+          <h3>主题索引</h3>
+          <select id="cloudSource" aria-label="词云来源"><option value="keywords">研究关键词</option><option value="topics">AI Topic</option></select>
+          <button id="clearCloud" type="button" hidden>清除词云筛选</button>
+          <span id="cloudInfo" aria-live="polite"></span>
+        </div>
+        <div id="wordCloud" class="word-cloud"></div>
+      </section>
       <div id="groups" class="published-groups"></div>
       <div class="result-heading">
         <h2>论文清单 <span id="visibleCount">0</span></h2>
@@ -62,5 +73,31 @@
   </div>
   <footer>论文元数据与摘要保留来源链接 · 收藏保存在当前浏览器</footer>
 </main>
+<dialog id="aiSettingsDialog" class="ai-dialog settings-dialog" aria-labelledby="aiSettingsTitle">
+  <div class="dialog-heading"><h2 id="aiSettingsTitle">连接我的 AI</h2><button id="closeAiSettings" type="button" aria-label="关闭 AI 设置">×</button></div>
+  <form id="aiSettingsForm">
+    <label>服务商<select id="aiProvider"><option value="deepseek">DeepSeek</option><option value="custom">其他兼容接口</option></select></label>
+    <label>接口地址<input id="aiEndpoint" type="url" value="https://api.deepseek.com" required readonly></label>
+    <label>模型<input id="aiModel" value="deepseek-flash" maxlength="100" required></label>
+    <label>API Key<input id="aiKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="4096"></label>
+    <p class="help">Key 仅在本页内存中使用，刷新即清除。发送时，论文标题、摘要和本篇对话将直接交给所选服务商，费用由你的账号承担。</p>
+    <p id="aiSettingsError" role="alert" hidden></p>
+    <div class="dialog-actions"><button id="disconnectAi" type="button">断开连接</button><button type="submit" class="primary">连接</button></div>
+  </form>
+</dialog>
+<dialog id="paperChat" class="ai-dialog chat-dialog" aria-labelledby="chatTitle">
+  <div class="dialog-heading"><h2 id="chatTitle">与论文对话</h2><button id="closePaperChat" type="button" aria-label="关闭论文对话">×</button></div>
+  <p id="chatScope" class="help"></p>
+  <div class="chat-toolbar"><button id="chatConnection" type="button">连接我的 AI</button><button id="clearChat" type="button">清空本篇对话</button></div>
+  <div id="chatMessages" class="chat-messages" role="log" aria-label="本篇论文对话" aria-live="polite"></div>
+  <div id="chatPrompts" class="chat-prompts">
+    <button type="button" data-question="请概括研究问题、核心贡献和方法，区分摘要中的作者主张与已报告的证据。">问题与贡献</button>
+    <button type="button" data-question="请按输入、关键步骤和输出拆解方法；摘要未提供的部分请明确标记。">拆解方法</button>
+    <button type="button" data-question="摘要明确报告了哪些实验结果？还有哪些证据需要阅读全文核实？不要把未报告的内容判成论文缺陷。">证据与待核实项</button>
+    <button type="button" data-question="请提取5个核心研究关键词，分别引用支持该关键词的标题或摘要原文，并解释关键词间的联系。">研究关键词</button>
+  </div>
+  <p id="chatError" role="alert" hidden></p>
+  <form id="chatForm" class="chat-form"><label for="chatQuestion" class="help">你的问题</label><textarea id="chatQuestion" rows="3" maxlength="2000" placeholder="询问这篇论文的问题、方法或摘要中的结果…" required></textarea><div class="dialog-actions"><button id="stopChat" type="button" hidden>停止</button><button id="sendChat" type="submit" class="primary" disabled>发送</button></div></form>
+</dialog>
 </body>
 </html>
